@@ -343,17 +343,25 @@ async function runLiveDiagnostics(user, target, description) {
   setHopState('client', 'active', 'Verifying...');
   setHopState('pop', 'active', 'Scanning...');
 
-  let clientIsActive = false;
+  let clientIsActive = true; // Default to true to allow best-effort pull
+  let isExplicitlyOffline = false;
   if (clientData) {
     const status = (clientData.status || clientData.client_status || 'inactive').toLowerCase();
-    clientIsActive = status === 'connected' || status === 'active' || status === 'enabled' || status === 'on';
+    isExplicitlyOffline = status === 'disconnected' || status === 'inactive' || status === 'disabled' || status === 'off';
+    if (isExplicitlyOffline) {
+      clientIsActive = false;
+    }
   }
 
   if (advancedLogsCheckbox && advancedLogsCheckbox.checked) {
-    if (!clientIsActive) {
-      appendLog(`[CLIENT DIAG] [WARNING] Steering client is currently offline or inactive. Skipping remote logs collection.`, 'warning');
-      localLogDiagnostics = { skipped: true, reason: 'Client device offline or steering inactive' };
+    if (isExplicitlyOffline) {
+      appendLog(`[CLIENT DIAG] [WARNING] Steering client is explicitly offline or inactive (status: ${clientData.status}). Skipping remote logs collection.`, 'warning');
+      localLogDiagnostics = { skipped: true, reason: 'Client device is offline or steering is disabled' };
     } else {
+      if (!clientData) {
+        appendLog(`[CLIENT DIAG] Client registration not found in tenant database. Attempting best-effort remote log collection...`, 'info');
+      }
+      
       let activeScenario = 'healthy';
       if (matchAlert) activeScenario = 'url-blocked';
       else if (sslAlert) activeScenario = 'ssl-decryption-failure';
