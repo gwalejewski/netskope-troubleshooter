@@ -12,6 +12,15 @@ export default {
       return handleApiDiagnosePing(request, env);
     } else if (path === "/api/netskope/proxy" && request.method === "POST") {
       return handleApiNetskopeProxy(request, env);
+    } else if (path === "/api/diagnose/env") {
+      return new Response(JSON.stringify({
+        has_tenant_url: !!env.NETSKOPE_TENANT_URL,
+        has_api_token: !!env.NETSKOPE_API_TOKEN,
+        has_mcp_key: !!env.NETSKOPE_MCP_SERVER_KEY,
+        env_keys: Object.keys(env)
+      }), {
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     // Default Static Asset Handler (serves index.html, style.css, app.js)
