@@ -210,6 +210,24 @@ troubleshootForm.addEventListener('submit', async (e) => {
   // Clean Workspace
   logTerminal.innerHTML = '';
   resetHopMap();
+
+  // Reset AI Verdict Card to loading state
+  const verdictCard = document.getElementById('verdict-card');
+  const verdictContent = document.getElementById('verdict-content');
+  if (verdictCard && verdictContent) {
+    const isAdvLogs = advancedLogsCheckbox && advancedLogsCheckbox.checked;
+    verdictCard.className = 'verdict-card info card-inner';
+    verdictContent.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px; padding: 5px 0;">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="3" fill="none" style="animation: spin 1.5s linear infinite; color: var(--accent-light);">
+          <circle cx="12" cy="12" r="10"></circle>
+        </svg>
+        <span style="font-weight: 500; font-size: 0.9em; color: var(--text-color);">
+          ${isAdvLogs ? 'Triggering remote collection and waiting for client log diagnostics...' : 'Analyzing steering path and compiling AI verdict...'}
+        </span>
+      </div>
+    `;
+  }
   
   // Set Loading state on main submit button
   const submitBtn = document.getElementById('run-diagnostics-btn');
