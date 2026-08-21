@@ -686,31 +686,11 @@ async function runLiveDiagnostics(user, target, description) {
     setHopState('policy', 'error', 'Blocked');
     setHopState('publisher', 'success', 'N/A');
     setHopState('dest', 'error', 'Blocked');
-
-    verdictCard.className = 'verdict-card error card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> A live block policy event was captured in the tenant logs matching this user and destination.</p>
-      <p><strong>Log Details:</strong> Rule <code>${matchAlert.policy}</code> blocked traffic targeting <code>${matchAlert.site || matchAlert.app || target}</code> under category <code>${matchAlert.category || 'N/A'}</code>.</p>
-      <p><strong>Action Recommendation:</strong> Create a policy override rule or modify the security group exception permissions in the policy management panel.</p>
-    `;
-    return;
   } else if (sslAlert) {
     appendLog(`[SSL ALERT] Captured SSL Decryption alert! Reason: "${sslAlert.reason || 'Handshake aborted by client'}"`, 'error');
     setHopState('policy', 'error', 'SSL Handshake Failed');
     setHopState('publisher', 'success', 'N/A');
     setHopState('dest', 'error', 'TLS Failure');
-
-    verdictCard.className = 'verdict-card error card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> Netskope SSL Decryption is causing connection drops due to TLS verification failure.</p>
-      <p><strong>Details:</strong> The log indicates an SSL error: <code>${sslAlert.reason || 'Alert 42 / Bad Certificate'}</code>. This happens when the destination application uses Certificate Pinning or does not trust the Netskope Root CA.</p>
-      <p><strong>Actionable Recommendations:</strong></p>
-      <ul>
-        <li>Add the target host (<code>${target}</code>) to the <strong>SSL Decryption Exception list</strong> under <strong>Settings > Steering > SSL Decryption > Exceptions</strong>.</li>
-        <li>Configure the steering exception to **Bypass / Do Not Decrypt** for this domain.</li>
-      </ul>
-    `;
-    return;
   } else {
     appendLog(`No recent block events found in alerts log for user targeting "${target}".`, 'success');
     
@@ -726,7 +706,6 @@ async function runLiveDiagnostics(user, target, description) {
       'box.com', 'salesforce.com', 'webex.com', 'gitlub.com'
     ];
     
-    const targetLower = target.toLowerCase();
     const isPinned = sslPinnedDomains.some(domain => targetLower.endsWith(domain) || targetLower.includes(domain));
     
     if (isPinned) {
