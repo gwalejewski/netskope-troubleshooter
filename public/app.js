@@ -584,6 +584,12 @@ async function runLiveDiagnostics(user, target, description) {
     }
 
     appendLog(`Scanning ${alerts.length} alert logs for matches to "${targetLower}"...`, 'info');
+    if (alerts.length > 0) {
+      const sampleAlerts = alerts.slice(0, 5).map(a => 
+        `[Target: ${a.site || a.app || a.url || 'unknown'}, Action: ${a.action || 'unknown'}]`
+      ).join(', ');
+      appendLog(`Recent alerts in tenant: ${sampleAlerts}`, 'system');
+    }
 
     // Look for standard Block alerts
     matchAlert = alerts.find(a => {
@@ -606,6 +612,45 @@ async function runLiveDiagnostics(user, target, description) {
                           (a.reason || '').toLowerCase().includes('decryption'));
       return isSiteMatch && isSslError;
     });
+
+    // Fallback 2: If no alerts matched, search in the Web events database (datasearch/web)
+    if (!matchAlert && !sslAlert) {
+      appendLog(`No policy block alerts found. Checking raw web traffic events database...`, 'info');
+      res = await fetch('/api/netskope/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
+          endpoint: `events/datasearch/web?limit=100&starttime=${starttime}&endtime=${endtime}`,
+          method: 'GET'
+        })
+      });
+      result = await res.json();
+      const webEvents = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
+      
+      appendLog(`Scanning ${webEvents.length} raw web traffic events for matches to "${targetLower}"...`, 'info');
+      if (webEvents.length > 0) {
+        const sampleWeb = webEvents.slice(0, 5).map(w => 
+          `[Site: ${w.site || w.url || 'unknown'}, Action: ${w.action || 'unknown'}]`
+        ).join(', ');
+        appendLog(`Recent web events in tenant: ${sampleWeb}`, 'system');
+      }
+
+      matchAlert = webEvents.find(w => {
+        const isSiteMatch = (w.site || '').toLowerCase().includes(targetLower) ||
+                            (w.url || '').toLowerCase().includes(targetLower) ||
+                            (w.app || '').toLowerCase().includes(targetLower);
+        const isBlock = (w.action === 'block' || w.action === 'deny' || w.action === 'blocked');
+        return isSiteMatch && isBlock;
+      });
+      
+      if (matchAlert) {
+        matchAlert.policy = matchAlert.policy || 'Web Policy Block';
+        matchAlert.category = matchAlert.category || matchAlert.url_category || 'Blocked Category';
+        matchAlert.site = matchAlert.site || matchAlert.url;
+      }
+    }
   } catch (err) {
     appendLog(`[Warning] Could not scan live policy alerts database: ${err.message}`, 'warning');
   }
