@@ -534,15 +534,43 @@ async function runLiveDiagnostics(user, target, description) {
     appendLog(`[Warning] Failed to fetch page traffic events: ${err.message}`, 'warning');
   }
 
-  // 2. Identify target client record
+  // 2. Pre-calculate block and SSL status from fetched events to resolve scope dependency
+  let matchAlert = alerts.find(a => {
+    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
+    const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
+    return isUserMatch && isBlock;
+  });
+
+  let sslAlert = alerts.find(a => {
+    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
+    const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
+                        (a.reason || '').toLowerCase().includes('ssl') || 
+                        (a.reason || '').toLowerCase().includes('handshake') ||
+                        (a.reason || '').toLowerCase().includes('pinning') ||
+                        (a.reason || '').toLowerCase().includes('decryption'));
+    return isUserMatch && isSslError;
+  });
+
+  const targetUserAlert = alerts.find(a => (a.user || a.username || '').toLowerCase().includes(prefix));
+  const targetUserPage = webEvents.find(w => (w.user || w.username || '').toLowerCase().includes(prefix));
+
+  if (!matchAlert && !sslAlert && targetUserPage) {
+    const policyName = (targetUserPage.policy || '').toLowerCase();
+    if (policyName.includes('block') || policyName.includes('deny') || policyName.includes('exception')) {
+      matchAlert = {
+        policy: targetUserPage.policy || 'Web Policy Block',
+        category: targetUserPage.category || targetUserPage.url_category || 'Blocked Category',
+        site: targetUserPage.site || targetUserPage.url || target
+      };
+    }
+  }
+
+  // 3. Identify target client record
   let clientData = clients.find(c => {
     const dbUser = (c.user || c.username || c.user_name || '').toLowerCase();
     return dbUser.includes(prefix) || prefix.includes(dbUser);
   });
 
-  // Fallback: If client status change log is missing, but they triggered a block or page event, extract device details from it!
-  const targetUserAlert = alerts.find(a => (a.user || a.username || '').toLowerCase().includes(prefix));
-  const targetUserPage = webEvents.find(w => (w.user || w.username || '').toLowerCase().includes(prefix));
   const activeTrafficEvent = targetUserAlert || targetUserPage;
 
   if (!clientData && activeTrafficEvent) {
@@ -634,41 +662,6 @@ async function runLiveDiagnostics(user, target, description) {
   // Hop 4 Evaluation: Policy Block Checks
   setHopState('policy', 'active', 'Checking alerts...');
   appendLog(`Checking policy alerts and event history for block events...`, 'info');
-
-  let matchAlert = null;
-  let sslAlert = null;
-
-  // Look for standard Block alerts matching user prefix
-  matchAlert = alerts.find(a => {
-    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
-    const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
-    return isUserMatch && isBlock;
-  });
-
-  // Look for SSL Decryption alerts matching user prefix
-  sslAlert = alerts.find(a => {
-    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
-    const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
-                        (a.reason || '').toLowerCase().includes('ssl') || 
-                        (a.reason || '').toLowerCase().includes('handshake') ||
-                        (a.reason || '').toLowerCase().includes('pinning') ||
-                        (a.reason || '').toLowerCase().includes('decryption'));
-    return isUserMatch && isSslError;
-  });
-
-  // Fallback 2: Check Page events
-  if (!matchAlert && !sslAlert) {
-    if (targetUserPage) {
-      const policyName = (targetUserPage.policy || '').toLowerCase();
-      if (policyName.includes('block') || policyName.includes('deny') || policyName.includes('exception')) {
-        matchAlert = {
-          policy: targetUserPage.policy || 'Web Policy Block',
-          category: targetUserPage.category || targetUserPage.url_category || 'Blocked Category',
-          site: targetUserPage.site || targetUserPage.url || target
-        };
-      }
-    }
-  }
 
   if (matchAlert) {
     appendLog(`[SECURITY ALERT] Found match block event! Rule: "${matchAlert.policy || 'Block'} ${matchAlert.category ? `(${matchAlert.category})` : ''}"`, 'error');
