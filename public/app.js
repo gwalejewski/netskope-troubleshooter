@@ -435,29 +435,24 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: 'steering/clients'
+        endpoint: 'events/datasearch/clientstatus?limit=5&query=' + encodeURIComponent("user eq '" + user + "'")
       })
     });
     
     const result = await res.json();
-    if (!result.success) throw new Error(result.error || 'Failed to fetch client list');
+    if (!result.success) throw new Error(result.error || 'Failed to fetch client status');
     
     // Scan for user
-    const clients = result.data.data || [];
-    clientData = clients.find(c => 
-      (c.user && c.user.toLowerCase() === user.toLowerCase()) || 
-      (c.username && c.username.toLowerCase() === user.toLowerCase()) ||
-      (c.email && c.email.toLowerCase() === user.toLowerCase())
-    );
+    const clients = Array.isArray(result.data) ? result.data : (result.data?.data || []);
+    clientData = clients[0]; // Get the latest client status event
 
     if (!clientData) {
       appendLog(`[WARNING] No active client registration found matching user query "${user}".`, 'warning');
       setHopState('user', 'warning', 'No Record');
-      // Look for similar
-      const similar = clients.slice(0, 3).map(c => c.user || c.username).join(', ');
-      if (similar) appendLog(`Found other active users: [${similar}]`, 'info');
     } else {
-      appendLog(`Successfully located client device: ${clientData.device_name || 'Generic Device'} (OS: ${clientData.os || 'Unknown'})`, 'success');
+      const host = clientData.hostname || clientData.host_name || clientData.device_name || 'Generic Device';
+      const osSystem = clientData.os || clientData.os_version || 'Unknown';
+      appendLog(`Successfully located client device: ${host} (OS: ${osSystem})`, 'success');
       setHopState('user', 'success', 'Verified');
     }
   } catch (err) {
@@ -474,13 +469,13 @@ async function runLiveDiagnostics(user, target, description) {
   setHopState('pop', 'active', 'Scanning...');
   
   if (clientData) {
-    const status = clientData.status || 'inactive';
-    const isSteering = status === 'connected' || status === 'active';
+    const status = (clientData.status || clientData.client_status || 'inactive').toLowerCase();
+    const isSteering = status === 'connected' || status === 'active' || status === 'enabled' || status === 'on';
     
-    telemetryPop.textContent = clientData.gateway || 'Unknown';
-    telemetryLatency.textContent = clientData.latency ? `${clientData.latency} ms` : 'N/A';
-    telemetryTunnel.textContent = clientData.tunnel_type || 'Unknown';
-    telemetryVersion.textContent = clientData.version || 'Unknown';
+    telemetryPop.textContent = clientData.gateway || clientData.active_pop || 'Unknown';
+    telemetryLatency.textContent = (clientData.latency || clientData.pop_latency) ? `${clientData.latency || clientData.pop_latency} ms` : 'N/A';
+    telemetryTunnel.textContent = clientData.tunnel_type || clientData.tunnel || 'Unknown';
+    telemetryVersion.textContent = clientData.client_version || clientData.version || 'Unknown';
 
     if (isSteering) {
       appendLog(`Steering status is active on PoP: ${clientData.gateway}. Connection latency: ${clientData.latency || 'N/A'}ms.`, 'success');
