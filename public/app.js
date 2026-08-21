@@ -8,6 +8,21 @@ let localLogDiagnostics = null;
 // Sleep helper for visual log pacing
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Wildcard domain matching helper (e.g. resolves qq.com matching *.qq.com or .qq.com)
+function matchDomainWildcard(domain, pattern) {
+  if (!domain || !pattern) return false;
+  const dom = domain.toLowerCase().trim();
+  let pat = pattern.toLowerCase().trim();
+  
+  // Remove leading dot or wildcard asterisk
+  pat = pat.replace(/^\*\./, '');
+  pat = pat.replace(/^\./, '');
+  
+  if (dom === pat) return true;
+  if (dom.endsWith('.' + pat)) return true;
+  return false;
+}
+
 // DOM Elements
 const troubleshootForm = document.getElementById('troubleshoot-form');
 const userEmailInput = document.getElementById('user-email');
@@ -620,7 +635,7 @@ async function runLiveDiagnostics(user, target, description) {
           const list = exc.exception_list || [];
           for (let item of list) {
             const val = (item.value || item.exception_value || '').toLowerCase();
-            if (val && (reqDomain.includes(val) || val.includes(reqDomain))) {
+            if (val && matchDomainWildcard(reqDomain, val)) {
               isBypassed = true;
               bypassRuleName = exc.exception_name || cfg.name || 'Steering exception';
               break;
@@ -636,7 +651,7 @@ async function runLiveDiagnostics(user, target, description) {
         const urls = list.urls || [];
         for (let u of urls) {
           const val = u.toLowerCase();
-          if (val && (reqDomain.includes(val) || val.includes(reqDomain))) {
+          if (val && matchDomainWildcard(reqDomain, val)) {
             isAllowedInUrlList = true;
             urlListName = list.name || 'URL list';
             break;
