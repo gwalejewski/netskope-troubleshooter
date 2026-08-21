@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A comprehensive diagnostics dashboard to troubleshoot user issues with Netskope Private Access, URL blocks, and connection latency.">
+  <title>Netskope Troubleshooter & Diagnostic Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow-bg"></div>
+  
+  <header class="app-header">
+    <div class="header-container">
+      <div class="logo-area">
+        <svg class="app-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <div class="logo-text">
+          <h1>Netskope Diagnostic Center</h1>
+          <p>Security Cloud Platform Troubleshooting Portal</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="status-badge" id="system-status">
+          <span class="status-pulse green"></span>
+          <span class="status-text">System Ready</span>
+        </div>
+        <button type="button" class="btn btn-secondary btn-icon" id="open-config-btn" title="Configure Live Netskope Tenant">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Configure Tenant
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="dashboard-main">
+    <div class="grid-container">
+      
+      <!-- Input Panel -->
+      <section class="panel glass-card input-panel">
+        <div class="panel-header">
+          <h2>Troubleshooting Setup</h2>
+          <p>Provide details of the affected user and the issue they are experiencing.</p>
+        </div>
+        
+        <form id="troubleshoot-form">
+          <div class="form-group">
+            <label for="user-email">Affected User Email</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              <input type="email" id="user-email" placeholder="user@company.com" required value="developer@corp.local">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="dest-target">Destination App or Website</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+              <input type="text" id="dest-target" placeholder="e.g. internal-app.corp or facebook.com" required value="internal-jira.corp">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="issue-description">Problem Description</label>
+            <textarea id="issue-description" rows="3" placeholder="Explain the symptoms (e.g., getting a connection refused, block page, or severe slowdown...)" required>Trying to load the internal Jira server but I keep getting a connection timeout. Other cloud websites work fine.</textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Diagnostics Mode</label>
+            <div class="radio-toggle-group">
+              <label class="radio-label">
+                <input type="radio" name="diag-mode" value="demo" checked>
+                <span class="radio-tile">
+                  <span class="title">Demo / Simulation</span>
+                  <span class="desc">Simulate common troubleshooting scenarios</span>
+                </span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="diag-mode" value="live">
+                <span class="radio-tile">
+                  <span class="title">Live Tenant API</span>
+                  <span class="desc">Query actual Netskope REST API</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group" id="demo-scenarios-container">
+            <label for="demo-scenario">Select Simulation Scenario</label>
+            <select id="demo-scenario" class="select-control">
+              <option value="npa-publisher-offline">NPA: Private App Publisher Offline (Jira Timeout)</option>
+              <option value="url-blocked">NG-SWG: Blocked Website Category (Social Media Policy)</option>
+              <option value="pop-high-latency">Performance: High PoP Latency & Jitter (Zoom Lag)</option>
+              <option value="client-disabled">Netskope Client: Steering Tunnel Offline</option>
+            </select>
+          </div>
+
+          <div id="live-banner" class="alert-banner warning hidden">
+            <div class="alert-content">
+              <strong>Live Mode Active</strong>: Ensure you have configured your tenant credentials via the settings button above.
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full" id="run-diagnostics-btn">
+            <svg class="spinner hidden" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+              <circle cx="12" cy="12" r="10"></circle>
+            </svg>
+            <span class="btn-text">Run Troubleshooter</span>
+          </button>
+        </form>
+      </section>
+
+      <!-- Diagnostic Results Workspace -->
+      <section class="panel glass-card workspace-panel">
+        <div class="panel-header">
+          <h2>Troubleshooting Workspace</h2>
+          <p id="workspace-sub">Enter user credentials and run diagnostic analysis above.</p>
+        </div>
+
+        <div class="workspace-placeholder" id="placeholder-view">
+          <svg viewBox="0 0 24 24" width="64" height="64" stroke="currentColor" stroke-width="1" fill="none">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          <h3>Awaiting Diagnosis</h3>
+          <p>Fill out the form on the left and start the troubleshooter to scan the Netskope Cloud Platform path.</p>
+        </div>
+
+        <div class="workspace-results hidden" id="results-view">
+          <!-- Visual Hop Map -->
+          <div class="hop-map-container">
+            <h3>Visual Traffic Path</h3>
+            <div class="hop-map">
+              <div class="hop-node active" id="hop-user" data-title="User Terminal">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                </div>
+                <span class="node-label">User PC</span>
+                <span class="node-status" id="hop-user-status">Checked</span>
+              </div>
+
+              <div class="hop-connector" id="conn-client"><div class="connector-line"></div></div>
+
+              <div class="hop-node" id="hop-client" data-title="Netskope Client Agent">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                </div>
+                <span class="node-label">Client</span>
+                <span class="node-status" id="hop-client-status">Pending</span>
+              </div>
+
+              <div class="hop-connector" id="conn-pop"><div class="connector-line"></div></div>
+
+              <div class="hop-node" id="hop-pop" data-title="Netskope Edge PoP">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><cloud><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></cloud></svg>
+                </div>
+                <span class="node-label">Edge PoP</span>
+                <span class="node-status" id="hop-pop-status">Pending</span>
+              </div>
+
+              <div class="hop-connector" id="conn-policy"><div class="connector-line"></div></div>
+
+              <div class="hop-node" id="hop-policy" data-title="Netskope Policy Engine">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                </div>
+                <span class="node-label">Policy</span>
+                <span class="node-status" id="hop-policy-status">Pending</span>
+              </div>
+
+              <div class="hop-connector" id="conn-publisher"><div class="connector-line"></div></div>
+
+              <div class="hop-node" id="hop-publisher" data-title="NPA Private Publisher">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                </div>
+                <span class="node-label">Publisher</span>
+                <span class="node-status" id="hop-publisher-status">Pending</span>
+              </div>
+
+              <div class="hop-connector" id="conn-dest"><div class="connector-line"></div></div>
+
+              <div class="hop-node" id="hop-dest" data-title="Destination Target App">
+                <div class="node-circle">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                </div>
+                <span class="node-label">Destination</span>
+                <span class="node-status" id="hop-dest-status">Pending</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Grid: Left Log Terminal, Right Details / AI Recommendation -->
+          <div class="results-grid">
+            <div class="results-left">
+              <!-- Logs Terminal -->
+              <div class="terminal-card">
+                <div class="terminal-header">
+                  <span class="terminal-dot red"></span>
+                  <span class="terminal-dot yellow"></span>
+                  <span class="terminal-dot green"></span>
+                  <span class="terminal-title">Diagnostic Logs</span>
+                  <button type="button" class="btn-clear-terminal" id="clear-log-btn" title="Clear Logs">Clear</button>
+                </div>
+                <div class="terminal-body" id="log-terminal">
+                  <div class="log-line system">Initializing diagnostics engine...</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="results-right">
+              <!-- Telemetry Metrics -->
+              <div class="telemetry-card card-inner">
+                <h3>Diagnostic Telemetry</h3>
+                <div class="metric-row">
+                  <span class="metric-label">Steering POP:</span>
+                  <span class="metric-val" id="telemetry-pop">-</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">Latency / Jitter:</span>
+                  <span class="metric-val" id="telemetry-latency">-</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">Tunnel Type:</span>
+                  <span class="metric-val" id="telemetry-tunnel">-</span>
+                </div>
+                <div class="metric-row">
+                  <span class="metric-label">Client Version:</span>
+                  <span class="metric-val" id="telemetry-version">-</span>
+                </div>
+              </div>
+
+              <!-- AI Verdict Panel -->
+              <div class="verdict-card card-inner warning" id="verdict-card">
+                <div class="verdict-header">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="verdict-icon">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                  <h3>AI Diagnostics Verdict</h3>
+                </div>
+                <div class="verdict-body" id="verdict-content">
+                  Awaiting diagnosis summary...
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <!-- Troubleshooting Toolbox Section -->
+    <section class="toolbox-panel glass-card">
+      <div class="panel-header">
+        <h2>Manual Networking Toolbox</h2>
+        <p>Run separate local diagnostics tests directly from the gateway server to the target domain.</p>
+      </div>
+      <div class="toolbox-actions">
+        <button type="button" class="btn btn-secondary btn-icon" id="tool-dns-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          Resolve Target DNS
+        </button>
+        <button type="button" class="btn btn-secondary btn-icon" id="tool-ping-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          TCP Connection Ping
+        </button>
+        <button type="button" class="btn btn-secondary btn-icon" id="tool-trace-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M12 2a10 10 0 0 0-7.07 17.07l1.41-1.41a8 8 0 1 1 11.32 0l1.41 1.41A10 10 0 0 0 12 2z"></path></svg>
+          Simulate NPA Path Route
+        </button>
+      </div>
+      
+      <!-- Toolbox Results Area -->
+      <div class="toolbox-console hidden" id="toolbox-output-container">
+        <div class="toolbox-console-header">
+          <span>Toolbox Output Console</span>
+          <button type="button" class="btn-clear-terminal" id="close-toolbox-btn">Close Console</button>
+        </div>
+        <pre class="toolbox-pre" id="toolbox-output">Console empty.</pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- Live Configuration Native Dialog Dialog -->
+  <dialog id="config-dialog" class="modal-dialog">
+    <div class="dialog-header">
+      <h2>Netskope Tenant Settings</h2>
+      <button type="button" class="btn-close-dialog" id="close-config-btn">&times;</button>
+    </div>
+    <form id="config-form" method="dialog">
+      <div class="dialog-body">
+        <p class="dialog-desc">Enter your Netskope REST API v2 credentials. This information is processed strictly server-side by your local agent backend and is not stored externally.</p>
+        
+        <div class="form-group">
+          <label for="tenant-url">Tenant API Gateway URL</label>
+          <input type="text" id="tenant-url" placeholder="e.g. companyname.goskope.com" required>
+          <span class="input-hint">The base domain of your Netskope cloud administration environment.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="api-token">REST API v2 Token</label>
+          <input type="password" id="api-token" placeholder="Enter Netskope-API-Token" required>
+          <span class="input-hint">Requires read scopes for <code>steering/clients</code>, <code>infrastructure/publishers</code>, and <code>events/dataexport/alerts</code>.</span>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" class="btn btn-secondary" id="dialog-cancel-btn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="dialog-save-btn">Save Configurations</button>
+      </div>
+    </form>
+  </dialog>
+
+  <footer class="app-footer">
+    <p>&copy; 2026 Netskope Platform Diagnostic Portal. Built using modern HTML5, CSS Grid, and custom web APIs.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
