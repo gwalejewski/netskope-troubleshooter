@@ -589,7 +589,7 @@ async function runLiveDiagnostics(user, target, description) {
         `[Target: ${a.site || a.app || a.url || 'unknown'}, Action: ${a.action || 'unknown'}]`
       ).join(', ');
       appendLog(`Recent alerts in tenant: ${sampleAlerts}`, 'system');
-      appendLog(`Debug Alert Schema (First Item): ${JSON.stringify(alerts[0]).slice(0, 400)}`, 'system');
+      appendLog(`Alert Keys: ${Object.keys(alerts[0]).join(', ')}`, 'system');
     }
 
     // Look for standard Block alerts
@@ -636,7 +636,7 @@ async function runLiveDiagnostics(user, target, description) {
           `[Site: ${w.site || w.url || 'unknown'}, Action: ${w.action || 'unknown'}]`
         ).join(', ');
         appendLog(`Recent page events in tenant: ${sampleWeb}`, 'system');
-        appendLog(`Debug Page Event Schema (First Item): ${JSON.stringify(webEvents[0]).slice(0, 400)}`, 'system');
+        appendLog(`Page Event Keys: ${Object.keys(webEvents[0]).join(', ')}`, 'system');
       }
 
       matchAlert = webEvents.find(w => {
