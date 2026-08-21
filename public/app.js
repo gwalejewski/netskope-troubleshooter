@@ -435,7 +435,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: 'events/datasearch/clientstatus?limit=5&query=' + encodeURIComponent("user eq '" + user + "'")
+        endpoint: 'events/datasearch/clientstatus?limit=5&query=' + encodeURIComponent("user like '" + user.split('@')[0] + "'")
       })
     });
     
@@ -512,19 +512,21 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: 'events/dataexport/alerts',
+        endpoint: 'events/datasearch/alert?limit=50&query=' + encodeURIComponent("user like '" + user.split('@')[0] + "'"),
         method: 'GET'
       })
     });
     const result = await res.json();
-    if (result.success && result.data && result.data.data) {
-      const alerts = result.data.data || [];
-      // Look for block alerts match user and target
-      matchAlert = alerts.find(a => 
-        (a.user && a.user.toLowerCase() === user.toLowerCase()) && 
-        (a.app || a.site || '').toLowerCase().includes(target.toLowerCase()) &&
-        (a.action === 'block' || a.action === 'deny')
-      );
+    if (result.success) {
+      const alerts = Array.isArray(result.data) ? result.data : (result.data?.data || []);
+      const targetLower = target.toLowerCase();
+      matchAlert = alerts.find(a => {
+        const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
+                            (a.site || '').toLowerCase().includes(targetLower) ||
+                            (a.url || '').toLowerCase().includes(targetLower);
+        const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
+        return isSiteMatch && isBlock;
+      });
     }
   } catch (err) {
     appendLog(`[Warning] Could not scan live policy alerts database: ${err.message}`, 'warning');
