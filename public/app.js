@@ -181,8 +181,6 @@ troubleshootForm.addEventListener('submit', async (e) => {
 
   try {
     await runLiveDiagnostics(userEmail, destTarget, description);
-    // Always append local client logs if they were pulled/analyzed
-    appendLocalLogSummaryIfAvailable();
   } catch (err) {
     appendLog(`Critical Error during troubleshooting scan: ${err.message}`, 'error');
   } finally {
@@ -345,22 +343,33 @@ async function runLiveDiagnostics(user, target, description) {
   setHopState('client', 'active', 'Verifying...');
   setHopState('pop', 'active', 'Scanning...');
 
+  let clientIsActive = false;
+  if (clientData) {
+    const status = (clientData.status || clientData.client_status || 'inactive').toLowerCase();
+    clientIsActive = status === 'connected' || status === 'active' || status === 'enabled' || status === 'on';
+  }
+
   if (advancedLogsCheckbox && advancedLogsCheckbox.checked) {
-    let activeScenario = 'healthy';
-    if (matchAlert) activeScenario = 'url-blocked';
-    else if (sslAlert) activeScenario = 'ssl-decryption-failure';
-    
-    await triggerClientLogPullFlow(user, target, description, activeScenario);
-    
-    if (localLogDiagnostics) {
-      clientData = {
-        status: localLogDiagnostics.tunnelState === 'down' ? 'inactive' : 'connected',
-        gateway: localLogDiagnostics.gateway || 'Chicago_US (ORD-1)',
-        os: 'mac',
-        client_version: localLogDiagnostics.version || '104.2.1.849',
-        latency: '14',
-        tunnel_type: 'DTLS / UDP'
-      };
+    if (!clientIsActive) {
+      appendLog(`[CLIENT DIAG] [WARNING] Steering client is currently offline or inactive. Skipping remote logs collection.`, 'warning');
+      localLogDiagnostics = { skipped: true, reason: 'Client device offline or steering inactive' };
+    } else {
+      let activeScenario = 'healthy';
+      if (matchAlert) activeScenario = 'url-blocked';
+      else if (sslAlert) activeScenario = 'ssl-decryption-failure';
+      
+      await triggerClientLogPullFlow(user, target, description, activeScenario);
+      
+      if (localLogDiagnostics && !localLogDiagnostics.skipped) {
+        clientData = {
+          status: localLogDiagnostics.tunnelState === 'down' ? 'inactive' : 'connected',
+          gateway: localLogDiagnostics.gateway || 'Chicago_US (ORD-1)',
+          os: 'mac',
+          client_version: localLogDiagnostics.version || '104.2.1.849',
+          latency: '14',
+          tunnel_type: 'DTLS / UDP'
+        };
+      }
     }
   }
 
@@ -591,28 +600,48 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
   // 6b. Correlate Local Client Log analysis if available
   let localLogSummary = "";
   if (localLogDiagnostics) {
-    localLogSummary = `
-      <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px;">
-        <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.95em;"><i class="fas fa-file-invoice"></i> Local Client Log Audit Summary:</p>
-        <p style="font-size: 0.85em; margin-bottom: 4px;">Tunnel State: <strong>${localLogDiagnostics.tunnelState.toUpperCase()}</strong> | Gateway POP: <strong>${localLogDiagnostics.gateway || 'Unknown'}</strong> | Version: <strong>${localLogDiagnostics.version || 'Unknown'}</strong></p>
-        ${localLogDiagnostics.issues.length > 0 ? 
-          `<p style="font-size: 0.8em; margin-bottom: 0; color: #ffad33;">Found ${localLogDiagnostics.issues.length} local anomalies. Recommended actions appended below.</p>` :
-          `<p style="font-size: 0.8em; margin-bottom: 0; color: #33cc66;">No critical anomalies found in local client logs.</p>`
-        }
-      </div>
-    `;
-    
-    // Add local issues to recommendations list
-    for (let issue of localLogDiagnostics.issues) {
-      if (issue.severity === 'error') severity = 'error';
-      else if (issue.severity === 'warning' && severity !== 'error') severity = 'warning';
+    if (localLogDiagnostics.skipped) {
+      localLogSummary = `
+        <div style="margin-top: 12px; background: rgba(255, 173, 51, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffad33; margin-bottom: 12px;">
+          <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.95em; color: #ffad33;"><i class="fas fa-file-invoice"></i> Local Client Log Audit Summary:</p>
+          <p style="font-size: 0.85em; margin-bottom: 0; color: var(--text-color);"><i class="fas fa-exclamation-triangle"></i> Remote log collection skipped: ${localLogDiagnostics.reason || 'Client offline/inactive'}</p>
+        </div>
+      `;
+    } else {
+      const staleWarning = localLogDiagnostics.isStale ? 
+        `<div style="font-size: 0.8em; color: #ffad33; margin-bottom: 6px; padding: 4px 8px; background: rgba(255,173,51,0.15); border-radius: 3px; display: flex; align-items: center; gap: 6px;">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span>Warning: Pulled logs are STALE (generated ${localLogDiagnostics.logAgeMinutes}m ago). Details may not reflect current state.</span>
+        </div>` : '';
+        
+      localLogSummary = `
+        <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px;">
+          <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.95em;"><i class="fas fa-file-invoice"></i> Local Client Log Audit Summary:</p>
+          ${staleWarning}
+          <p style="font-size: 0.85em; margin-bottom: 4px;">Tunnel State: <strong>${localLogDiagnostics.tunnelState.toUpperCase()}</strong> | Gateway POP: <strong>${localLogDiagnostics.gateway || 'Unknown'}</strong> | Version: <strong>${localLogDiagnostics.version || 'Unknown'}</strong></p>
+          ${localLogDiagnostics.issues.length > 0 ? 
+            `<p style="font-size: 0.8em; margin-bottom: 0; color: #ffad33;">Found ${localLogDiagnostics.issues.length} local anomalies. Recommended actions appended below.</p>` :
+            `<p style="font-size: 0.8em; margin-bottom: 0; color: #33cc66;">No critical anomalies found in local client logs.</p>`
+          }
+        </div>
+      `;
       
-      recommendations.push(`Local Log Insight: ${issue.detail}`);
-    }
-    if (localLogDiagnostics.tunnelState === 'down') {
-      severity = 'error';
-      diagnosis = `Local Client steering tunnel is offline. ${diagnosis}`;
-      recommendations.push("Local Log Insight: Start or restart the local STAgent steering service on the client device.");
+      // Add local issues to recommendations list
+      for (let issue of localLogDiagnostics.issues) {
+        if (issue.severity === 'error') severity = 'error';
+        else if (issue.severity === 'warning' && severity !== 'error') severity = 'warning';
+        
+        recommendations.push(`Local Log Insight: ${issue.detail}`);
+      }
+      if (localLogDiagnostics.tunnelState === 'down') {
+        severity = 'error';
+        diagnosis = `Local Client steering tunnel is offline. ${diagnosis}`;
+        recommendations.push("Local Log Insight: Start or restart the local STAgent steering service on the client device.");
+      }
     }
   }
 
@@ -756,6 +785,16 @@ async function triggerClientLogPullFlow(user, target, description, activeScenari
   const logText = generateSimulatedClientLogs(user, target, description, activeScenario);
   localLogDiagnostics = parseLocalClientLog(logText);
 
+  // Freshness check: Let's calculate log timestamp age
+  appendLog(`[CLIENT DIAG] [ADVANCED] Verifying client log freshness...`, 'info');
+  await sleep(800);
+
+  if (localLogDiagnostics.isStale) {
+    appendLog(`[CLIENT DIAG] [WARNING] Pulled client logs are stale (generated ${localLogDiagnostics.logAgeMinutes} minutes ago). This may reflect cached telemetry.`, 'warning');
+  } else {
+    appendLog(`[CLIENT DIAG] [ADVANCED] Logs verified fresh (generated ${localLogDiagnostics.logAgeSeconds} seconds ago).`, 'success');
+  }
+
   appendLog(`[CLIENT DIAG] Successfully parsed client logs! Gateway: ${localLogDiagnostics.gateway || 'Chicago_US (ORD-1)'} | Version: ${localLogDiagnostics.version || '104.2.1.849'}`, 'success');
   
   if (localLogDiagnostics.tunnelState === 'down') {
@@ -771,7 +810,12 @@ async function triggerClientLogPullFlow(user, target, description, activeScenari
 
 // Generate realistic client log lines matching scenario and configuration
 function generateSimulatedClientLogs(user, target, description, scenario) {
-  const time = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  let logTimeOffset = 0;
+  if (description.toLowerCase().includes('stale') || target.toLowerCase().includes('stale')) {
+    logTimeOffset = 12 * 60 * 1000; // 12 minutes ago (stale check simulation)
+  }
+  
+  const time = new Date(Date.now() - logTimeOffset).toISOString().replace('T', ' ').substring(0, 19);
   const targetLower = target.toLowerCase();
   
   let logs = [];
@@ -816,6 +860,30 @@ function parseLocalClientLog(logText) {
   let tunnelState = "unknown";
   let detectedGateway = "unknown";
   let detectedVersion = "unknown";
+  
+  // Freshness calculation
+  let logTime = null;
+  const firstLine = lines[0];
+  if (firstLine) {
+    const match = firstLine.match(/\[([0-9\-:\s]+)\]/);
+    if (match) {
+      // Parse timestamp like "2026-08-21 11:55:00"
+      const dateStr = match[1].replace(' ', 'T') + 'Z';
+      logTime = Date.parse(dateStr);
+    }
+  }
+
+  let isStale = false;
+  let logAgeSeconds = 0;
+  let logAgeMinutes = 0;
+  
+  if (logTime && !isNaN(logTime)) {
+    const now = Date.now();
+    logAgeSeconds = Math.max(0, Math.floor((now - logTime) / 1000));
+    logAgeMinutes = Math.floor(logAgeSeconds / 60);
+    // If log is older than 5 minutes (300 seconds), mark as stale
+    isStale = logAgeSeconds > 300;
+  }
   
   for (let line of lines) {
     const lineLower = line.toLowerCase();
@@ -881,52 +949,11 @@ function parseLocalClientLog(logText) {
     gateway: detectedGateway === "unknown" ? null : detectedGateway,
     version: detectedVersion === "unknown" ? null : detectedVersion,
     issues: uniqueIssues,
-    rawLength: lines.length
+    rawLength: lines.length,
+    isStale,
+    logAgeSeconds,
+    logAgeMinutes
   };
-}
-
-// Append pulled local client log diagnostics directly into an active verdict card
-function appendLocalLogSummaryIfAvailable() {
-  if (!localLogDiagnostics) return;
-  const verdictContent = document.getElementById('verdict-content');
-  if (!verdictContent) return;
-  
-  // Avoid duplicate cards
-  if (verdictContent.innerHTML.includes('Local Client Log Audit Summary')) return;
-  
-  const localLogHTML = `
-    <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px; text-align: left;">
-      <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.95em;"><i class="fas fa-file-invoice"></i> Local Client Log Audit Summary:</p>
-      <p style="font-size: 0.85em; margin-bottom: 4px;">Tunnel State: <strong>${localLogDiagnostics.tunnelState.toUpperCase()}</strong> | Gateway POP: <strong>${localLogDiagnostics.gateway || 'Chicago_US (ORD-1)'}</strong> | Version: <strong>${localLogDiagnostics.version || '104.2.1.849'}</strong></p>
-      ${localLogDiagnostics.issues.length > 0 ? 
-        `<p style="font-size: 0.8em; margin-bottom: 0; color: #ffad33;">Found ${localLogDiagnostics.issues.length} local anomalies. Recommended actions appended below.</p>` :
-        `<p style="font-size: 0.8em; margin-bottom: 0; color: #33cc66;">No critical anomalies found in local client logs.</p>`
-      }
-    </div>
-  `;
-  
-  // Append recommendations to existing ul
-  const recList = verdictContent.querySelector('ul');
-  if (recList) {
-    for (let issue of localLogDiagnostics.issues) {
-      const li = document.createElement('li');
-      li.innerHTML = `Local Log Insight: ${issue.detail}`;
-      recList.appendChild(li);
-    }
-    if (localLogDiagnostics.tunnelState === 'down') {
-      const li = document.createElement('li');
-      li.innerHTML = "Local Log Insight: Start or restart the local STAgent steering service on the client device.";
-      recList.appendChild(li);
-    }
-  }
-  
-  // Insert summary card right before the recommendations header
-  const recHeader = Array.from(verdictContent.querySelectorAll('p')).find(p => p.textContent.includes('Actionable Recommendations'));
-  if (recHeader) {
-    recHeader.insertAdjacentHTML('beforebegin', localLogHTML);
-  } else {
-    verdictContent.innerHTML += localLogHTML;
-  }
 }
 
 // Initialization
