@@ -185,7 +185,22 @@ async function handleApiNetskopeProxy(request, env) {
     }
     cleanTenant = cleanTenant.replace(/\/+$/, "");
 
-    const url = `${cleanTenant}/api/v2/${endpoint}`;
+    let url;
+    if (endpoint.startsWith("steelcase/") || endpoint.startsWith("mcp")) {
+      const mcpKey = env.NETSKOPE_MCP_SERVER_KEY || "";
+      const cleanEndpoint = endpoint
+        .replace("{NETSKOPE_MCP_SERVER_KEY}", mcpKey)
+        .replace("NETSKOPE_MCP_SERVER_KEY", mcpKey);
+      
+      if (cleanEndpoint === "mcp") {
+        url = `${cleanTenant}/steelcase/${mcpKey}/mcp`;
+      } else {
+        const slashedEndpoint = cleanEndpoint.startsWith("/") ? cleanEndpoint : `/${cleanEndpoint}`;
+        url = `${cleanTenant}${slashedEndpoint}`;
+      }
+    } else {
+      url = `${cleanTenant}/api/v2/${endpoint}`;
+    }
 
     const options = {
       method,
