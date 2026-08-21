@@ -9,24 +9,12 @@ let localLogDiagnostics = null;
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // DOM Elements
-const configDialog = document.getElementById('config-dialog');
-const openConfigBtn = document.getElementById('open-config-btn');
-const closeConfigBtn = document.getElementById('close-config-btn');
-const dialogCancelBtn = document.getElementById('dialog-cancel-btn');
-const configForm = document.getElementById('config-form');
-const tenantUrlInput = document.getElementById('tenant-url');
-const apiTokenInput = document.getElementById('api-token');
-
 const troubleshootForm = document.getElementById('troubleshoot-form');
 const userEmailInput = document.getElementById('user-email');
 const destTargetInput = document.getElementById('dest-target');
 const issueDescInput = document.getElementById('issue-description');
-const diagModeRadios = document.getElementsByName('diag-mode');
-const demoScenarioSelect = document.getElementById('demo-scenario');
-const demoScenariosContainer = document.getElementById('demo-scenarios-container');
-const liveBanner = document.getElementById('live-banner');
-const systemStatusBadge = document.getElementById('system-status');
 const advancedLogsCheckbox = document.getElementById('advanced-logs-checkbox');
+const systemStatusBadge = document.getElementById('system-status');
 
 const placeholderView = document.getElementById('placeholder-view');
 const resultsView = document.getElementById('results-view');
@@ -77,27 +65,6 @@ const closeToolboxBtn = document.getElementById('close-toolbox-btn');
 const toolboxOutputContainer = document.getElementById('toolbox-output-container');
 const toolboxOutput = document.getElementById('toolbox-output');
 
-// Load configurations from SessionStorage
-function loadConfig() {
-  const url = sessionStorage.getItem('ns_tenant_url');
-  const token = sessionStorage.getItem('ns_api_token');
-  if (url && token) {
-    tenantConfig.url = url;
-    tenantConfig.token = token;
-    tenantUrlInput.value = url;
-    apiTokenInput.value = token;
-    setSystemStatus('Configured', 'green');
-  }
-}
-
-// System Status Indicator Helper
-function setSystemStatus(text, color) {
-  const badgeText = systemStatusBadge.querySelector('.status-text');
-  const badgePulse = systemStatusBadge.querySelector('.status-pulse');
-  badgeText.textContent = text;
-  badgePulse.className = `status-pulse ${color}`;
-}
-
 // Log streaming helper
 function appendLog(message, type = 'info') {
   const div = document.createElement('div');
@@ -111,32 +78,6 @@ function appendLog(message, type = 'info') {
 // Clear Terminal
 clearLogBtn.addEventListener('click', () => {
   logTerminal.innerHTML = '<div class="log-line system">Terminal logs cleared.</div>';
-});
-
-// Setup Configuration Modals
-openConfigBtn.addEventListener('click', () => configDialog.showModal());
-closeConfigBtn.addEventListener('click', () => configDialog.close());
-dialogCancelBtn.addEventListener('click', () => configDialog.close());
-
-configForm.addEventListener('submit', (e) => {
-  sessionStorage.setItem('ns_tenant_url', tenantUrlInput.value.trim());
-  sessionStorage.setItem('ns_api_token', apiTokenInput.value.trim());
-  loadConfig();
-  appendLog('Netskope Tenant settings saved successfully.', 'success');
-});
-
-// Toggle Modes: Live vs Demo UI switches
-diagModeRadios.forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    if (e.target.value === 'live') {
-      demoScenariosContainer.classList.add('hidden');
-      liveBanner.classList.remove('hidden');
-      // Do not force show config dialog as secrets can be configured server-side
-    } else {
-      demoScenariosContainer.classList.remove('hidden');
-      liveBanner.classList.add('hidden');
-    }
-  });
 });
 
 // Reset Hop Map states
@@ -200,7 +141,6 @@ troubleshootForm.addEventListener('submit', async (e) => {
   const userEmail = userEmailInput.value.trim();
   const destTarget = destTargetInput.value.trim();
   const description = issueDescInput.value.trim();
-  const mode = Array.from(diagModeRadios).find(r => r.checked).value;
 
   // Visual Swap
   placeholderView.classList.add('hidden');
@@ -240,11 +180,7 @@ troubleshootForm.addEventListener('submit', async (e) => {
   btnText.textContent = 'Running Scan...';
 
   try {
-    if (mode === 'live') {
-      await runLiveDiagnostics(userEmail, destTarget, description);
-    } else {
-      await runSimulatedDiagnostics(userEmail, destTarget, description);
-    }
+    await runLiveDiagnostics(userEmail, destTarget, description);
     // Always append local client logs if they were pulled/analyzed
     appendLocalLogSummaryIfAvailable();
   } catch (err) {
@@ -256,224 +192,6 @@ troubleshootForm.addEventListener('submit', async (e) => {
     btnText.textContent = 'Run Troubleshooter';
   }
 });
-
-// --- MOCK SIMULATOR ENGINE ---
-async function runSimulatedDiagnostics(user, target, description) {
-  const scenario = demoScenarioSelect.value;
-  appendLog(`Starting troubleshooting in Simulation Mode for scenario: [${scenario}]`, 'system');
-  await sleep(1000);
-  
-  appendLog(`Checking User Client connection credentials...`, 'info');
-  setHopState('user', 'success', 'Verified');
-  setConnectorActive('client', true);
-  await sleep(1200);
-
-  // Check client agent status
-  appendLog(`Contacting local steering service on user endpoint...`, 'info');
-  
-  if (advancedLogsCheckbox && advancedLogsCheckbox.checked) {
-    await triggerClientLogPullFlow(user, target, description, scenario);
-  }
-
-  if (scenario === 'client-disabled') {
-    setHopState('client', 'error', 'Offline');
-    appendLog(`[ERROR] Netskope client steering interface is reporting status: DISABLED`, 'error');
-    appendLog(`Tunnel status: Down. Traffic is currently bypassing the Netskope Cloud Platform.`, 'warning');
-    
-    // Telemetry updates
-    telemetryPop.textContent = 'None (Bypassed)';
-    telemetryLatency.textContent = 'N/A';
-    telemetryTunnel.textContent = 'Offline';
-    telemetryVersion.textContent = '103.5.2.1458 (Unresponsive)';
-    
-    // AI Verdict
-    verdictCard.className = 'verdict-card error card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> The Netskope Client service on the user's workstation is disabled or failed to initialize.</p>
-      <p><strong>Actionable Recommendations:</strong></p>
-      <ul>
-        <li>Open the client console and verify steering status. If disabled, click <strong>Enable</strong>.</li>
-        <li>Restart the local service: <code>sudo launchctl kickstart -k system/com.netskope.client.launcher</code> (Mac) or restart the "Netskope Client" service in Windows Services.</li>
-        <li>Generate a diagnostics package by running <code>nsdiag</code> and check configuration parameters.</li>
-      </ul>
-    `;
-    return;
-  }
-
-  setHopState('client', 'success', 'Steering');
-  setConnectorActive('pop', true);
-  appendLog(`Client steering active. Steering Client version: 104.2.1.849. Protocol: DTLS.`, 'success');
-  await sleep(1200);
-
-  // Check PoP Connection
-  appendLog(`Analyzing route latency to nearest Netskope Gateway (POP)...`, 'info');
-  if (scenario === 'pop-high-latency') {
-    setHopState('pop', 'warning', 'High Latency');
-    setConnectorActive('policy', true);
-    
-    telemetryPop.textContent = 'New York, US (EWR-3)';
-    telemetryLatency.textContent = '380 ms (Jitter: 42ms)';
-    telemetryTunnel.textContent = 'IPsec / UDP';
-    telemetryVersion.textContent = '104.2.1.849';
-    
-    appendLog(`[WARNING] Latency to POP [EWR-3] is unusually high: 380ms. Normal baseline is < 30ms.`, 'warning');
-    appendLog(`Detection matches user report of "Zoom call lag" and sluggishness.`, 'info');
-    await sleep(1000);
-    
-    appendLog(`Running path steering policy analysis...`, 'info');
-    setHopState('policy', 'success', 'Passed');
-    setConnectorActive('publisher', true);
-    await sleep(800);
-    
-    setHopState('publisher', 'success', 'N/A (SaaS)');
-    setConnectorActive('dest', true);
-    await sleep(800);
-    
-    setHopState('dest', 'success', 'Accessible');
-    appendLog(`Target application ${target} reached, but network performance is severely degraded.`, 'warning');
-    
-    verdictCard.className = 'verdict-card warning card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> The connection path is steering successfully, but the user is suffering from severe congestion or an inefficient routing loop to the local Netskope Gateway PoP.</p>
-      <p><strong>Actionable Recommendations:</strong></p>
-      <ul>
-        <li>Instruct the user to toggle WiFi or disconnect/reconnect the Netskope Client to force a steering evaluation to a different PoP.</li>
-        <li>Check if the user is using a VPN or local ISP tunnel (like PPPoE) that increases MTU overhead or fragmentation.</li>
-        <li>Contact network admins to verify public DNS resolution for <code>gateway.goskope.com</code> is pointing to the nearest geographically optimal address.</li>
-      </ul>
-    `;
-    return;
-  }
-
-  // Normal POP Status
-  setHopState('pop', 'success', 'Passed');
-  setConnectorActive('policy', true);
-  telemetryPop.textContent = 'Chicago, US (ORD-1)';
-  telemetryLatency.textContent = '14 ms (Jitter: 2ms)';
-  telemetryTunnel.textContent = 'DTLS / UDP';
-  telemetryVersion.textContent = '104.2.1.849';
-  appendLog(`Connected to POP: Chicago (ORD-1). Gateway Latency: 14ms (Healthy).`, 'success');
-  await sleep(1200);
-
-  // Policy Engine checks
-  appendLog(`Evaluating Next-Gen SWG and Firewall access policies for user...`, 'info');
-  
-  if (scenario === 'ssl-decryption-failure') {
-    setHopState('policy', 'warning', 'Decrypted');
-    appendLog(`Evaluating SSL Decryption rules matching category: "Cloud Services"...`, 'info');
-    appendLog(`Netskope Proxy certificate (Netskope Root CA) injected for MITM SSL Decryption.`, 'info');
-    await sleep(1200);
-    
-    appendLog(`[ERROR] SSL Handshake aborted by client application during key exchange.`, 'error');
-    appendLog(`[TLS ALERT] Alert 42 (Bad Certificate) received from client endpoint.`, 'error');
-    appendLog(`Verification Failed: Application uses hardcoded Certificate Pinning and does not trust the Netskope Root CA.`, 'warning');
-    
-    setHopState('publisher', 'success', 'N/A');
-    setHopState('dest', 'error', 'SSL Handshake Failed');
-    
-    verdictCard.className = 'verdict-card error card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> The target application (<code>${target}</code>) enforces SSL/TLS Certificate Pinning and rejected the Netskope Proxy decryption certificate.</p>
-      <p><strong>Details:</strong> Standard SSL Decryption (MITM) replaces the original site certificate with a Netskope-signed CA certificate. Pinned applications detect this mismatch and terminate the handshake immediately to prevent perceived eavesdropping.</p>
-      <p><strong>Actionable Recommendations:</strong></p>
-      <ul>
-        <li>Create an <strong>SSL Decryption Bypass Policy</strong> for this domain under <strong>Settings > Steering > SSL Decryption > Exceptions</strong>.</li>
-        <li>Ensure the target domain <code>${target}</code> is added to the <strong>SSL Bypass / Do Not Decrypt</strong> group.</li>
-        <li>Instruct the user to restart the application after the bypass rule is applied in the Netskope admin tenant.</li>
-      </ul>
-    `;
-    return;
-  }
-
-  if (scenario === 'url-blocked') {
-    setHopState('policy', 'error', 'Blocked');
-    appendLog(`[SECURITY ALERT] Request to target [${target}] matched Block Rule: "Global Social Media Policy"`, 'error');
-    appendLog(`Blocked Category: "Social Networks". Action: BLOCK. Block Page served.`, 'error');
-    
-    telemetryPop.textContent = 'Chicago, US (ORD-1)';
-    telemetryLatency.textContent = '14 ms';
-    telemetryTunnel.textContent = 'DTLS / UDP';
-    telemetryVersion.textContent = '104.2.1.849';
-
-    // UI Updates
-    setHopState('publisher', 'success', 'N/A');
-    setHopState('dest', 'error', 'Blocked');
-    
-    verdictCard.className = 'verdict-card error card-inner';
-    verdictContent.innerHTML = `
-      <p><strong>Diagnosis:</strong> The user was blocked from reaching the target application by standard tenant Web Filtering policy rules.</p>
-      <p><strong>Policy Details:</strong> Match Category <code>Social Networks</code>, triggering Block action on rule <code>Global Social Media Policy</code>.</p>
-      <p><strong>Actionable Recommendations:</strong></p>
-      <ul>
-        <li>If access is business-justified, create a policy exception rule for this user's AD group or email.</li>
-        <li>Alternatively, place the target domain (<code>${target}</code>) in the custom Web-Bypass list or Steering Exception list.</li>
-        <li>Check if the site's classification is correct in the Netskope Cloud Confidence Index (CCI).</li>
-      </ul>
-    `;
-    return;
-  }
-
-  setHopState('policy', 'success', 'Allowed');
-  setConnectorActive('publisher', true);
-  appendLog(`Policies evaluated. Request to [${target}] matches policy Rule: "General Outbound Access". Action: ALLOW.`, 'success');
-  await sleep(1200);
-
-  // Private Access (NPA) checks
-  appendLog(`Checking routing type for destination [${target}]...`, 'info');
-  const isPrivate = target.endsWith('.corp') || target.endsWith('.local') || target.startsWith('10.') || target.startsWith('192.168.');
-  
-  if (isPrivate) {
-    appendLog(`Destination detected as a private application segment. Steering via NPA (Netskope Private Access).`, 'info');
-    appendLog(`Locating active NPA Publishers hosting network segment...`, 'info');
-    await sleep(1000);
-
-    if (scenario === 'npa-publisher-offline') {
-      setHopState('publisher', 'error', 'Offline');
-      appendLog(`[ERROR] Publisher [US-Chicago-Pub01] routing segment for [${target}] is reporting status: OFFLINE`, 'error');
-      appendLog(`Connection tunnel status between Cloud Edge and Publisher is disconnected. Check network path.`, 'error');
-      
-      setHopState('dest', 'error', 'Unreachable');
-      
-      verdictCard.className = 'verdict-card error card-inner';
-      verdictContent.innerHTML = `
-        <p><strong>Diagnosis:</strong> Netskope Private Access steering is working, but the target Private Publisher is offline or unable to connect back to the Netskope Cloud.</p>
-        <p><strong>Actionable Recommendations:</strong></p>
-        <ul>
-          <li>Log in to the Publisher host (virtual appliance) and check core services: <code>sudo systemctl status npa-publisher</code>.</li>
-          <li>Examine publisher registration logs at <code>~/logs/publisher_wizard.log</code> or connectivity stats in <code>~/logs/agent.txt</code>.</li>
-          <li>Ensure outbound security rules on the publisher's firewall allow HTTPS (Port 443) to <code>*.goskope.com</code>.</li>
-        </ul>
-      `;
-      return;
-    }
-
-    setHopState('publisher', 'success', 'Online');
-    setConnectorActive('dest', true);
-    appendLog(`Publisher [US-Chicago-Pub01] is ONLINE. CPU: 12%, Mem: 45%, Tunnel Latency: 8ms.`, 'success');
-    await sleep(1200);
-
-    appendLog(`Establishing TCP handshakes from publisher to private app [${target}]...`, 'info');
-    setHopState('dest', 'success', 'Connected');
-    appendLog(`Successfully established connection. Troubleshooting complete. Path is fully healthy.`, 'success');
-
-  } else {
-    // SaaS/Public App path
-    setHopState('publisher', 'success', 'N/A (Public Path)');
-    setConnectorActive('dest', true);
-    await sleep(1000);
-    appendLog(`Target [${target}] is a public domain. Sending traffic directly via Cloud Secure Web Gateway.`, 'info');
-    setHopState('dest', 'success', 'Connected');
-    appendLog(`Connected. Response headers: HTTP 200 OK. Transaction verified.`, 'success');
-  }
-
-  // Final success verdict
-  verdictCard.className = 'verdict-card success card-inner';
-  verdictContent.innerHTML = `
-    <p><strong>Diagnosis:</strong> The path between the client and the destination app is fully functional and healthy.</p>
-    <p><strong>Details:</strong> Standard steering POP [ORD-1] latency is low, access policies allow traffic, and connection checks succeed.</p>
-    <p><strong>Recommendation:</strong> The issue might be transient, or related to the user's browser cache/credentials. Request user to clear browser cache and try again.</p>
-  `;
-}
 
 // --- LIVE TENANT API INTEGRATION ENGINE ---
 async function runLiveDiagnostics(user, target, description) {
@@ -1213,5 +931,5 @@ function appendLocalLogSummaryIfAvailable() {
 
 // Initialization
 window.addEventListener('DOMContentLoaded', () => {
-  loadConfig();
+  // Live credentials configured server-side via environment secrets
 });

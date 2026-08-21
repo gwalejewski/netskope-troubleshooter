@@ -29,13 +29,6 @@
           <span class="status-pulse green"></span>
           <span class="status-text">System Ready</span>
         </div>
-        <button type="button" class="btn btn-secondary btn-icon" id="open-config-btn" title="Configure Live Netskope Tenant">
-          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-          Configure Tenant
-        </button>
       </div>
     </div>
   </header>
@@ -79,36 +72,7 @@
             <textarea id="issue-description" rows="3" placeholder="Explain the symptoms (e.g., getting a connection refused, block page, or severe slowdown...)" required>Trying to load the internal Jira server but I keep getting a connection timeout. Other cloud websites work fine.</textarea>
           </div>
 
-          <div class="form-group">
-            <label>Diagnostics Mode</label>
-            <div class="radio-toggle-group">
-              <label class="radio-label">
-                <input type="radio" name="diag-mode" value="demo" checked>
-                <span class="radio-tile">
-                  <span class="title">Demo / Simulation</span>
-                  <span class="desc">Simulate common troubleshooting scenarios</span>
-                </span>
-              </label>
-              <label class="radio-label">
-                <input type="radio" name="diag-mode" value="live">
-                <span class="radio-tile">
-                  <span class="title">Live Tenant API</span>
-                  <span class="desc">Query actual Netskope REST API</span>
-                </span>
-              </label>
-            </div>
-          </div>
 
-          <div class="form-group" id="demo-scenarios-container">
-            <label for="demo-scenario">Select Simulation Scenario</label>
-            <select id="demo-scenario" class="select-control">
-              <option value="npa-publisher-offline">NPA: Private App Publisher Offline (Jira Timeout)</option>
-              <option value="url-blocked">NG-SWG: Blocked Website Category (Social Media Policy)</option>
-              <option value="pop-high-latency">Performance: High PoP Latency & Jitter (Zoom Lag)</option>
-              <option value="client-disabled">Netskope Client: Steering Tunnel Offline</option>
-              <option value="ssl-decryption-failure">SSL Decryption: Handshake Error (App Certificate Pinning)</option>
-            </select>
-          </div>
 
           <div class="form-group" style="margin-top: 15px; margin-bottom: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; user-select: none;">
@@ -310,34 +274,7 @@
     </section>
   </main>
 
-  <!-- Live Configuration Native Dialog Dialog -->
-  <dialog id="config-dialog" class="modal-dialog">
-    <div class="dialog-header">
-      <h2>Netskope Tenant Settings</h2>
-      <button type="button" class="btn-close-dialog" id="close-config-btn">&times;</button>
-    </div>
-    <form id="config-form" method="dialog">
-      <div class="dialog-body">
-        <p class="dialog-desc">Enter your Netskope REST API v2 credentials. This information is processed strictly server-side by your local agent backend and is not stored externally.</p>
-        
-        <div class="form-group">
-          <label for="tenant-url">Tenant API Gateway URL</label>
-          <input type="text" id="tenant-url" placeholder="e.g. companyname.goskope.com" required>
-          <span class="input-hint">The base domain of your Netskope cloud administration environment.</span>
-        </div>
 
-        <div class="form-group">
-          <label for="api-token">REST API v2 Token</label>
-          <input type="password" id="api-token" placeholder="Enter Netskope-API-Token" required>
-          <span class="input-hint">Requires read scopes for <code>steering/clients</code>, <code>infrastructure/publishers</code>, and <code>events/dataexport/alerts</code>.</span>
-        </div>
-      </div>
-      <div class="dialog-footer">
-        <button type="button" class="btn btn-secondary" id="dialog-cancel-btn">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="dialog-save-btn">Save Configurations</button>
-      </div>
-    </form>
-  </dialog>
 
   <footer class="app-footer">
     <p>&copy; 2026 Netskope Platform Diagnostic Portal. Built using modern HTML5, CSS Grid, and custom web APIs.</p>
