@@ -552,105 +552,72 @@ async function runLiveDiagnostics(user, target, description) {
     const prefix = user.split('@')[0];
     const targetLower = target.toLowerCase();
     
-    // Pass 1: Query by specific user prefix (7-day window)
+    // Query specifically for alerts matching the target site/app/url in the last 7 days
     let res = await fetch('/api/netskope/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
+        endpoint: `events/datasearch/alert?limit=50&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`(site like '${target}' or app like '${target}' or url like '${target}')`),
         method: 'GET'
       })
     });
     let result = await res.json();
     let alerts = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
     
-    // Fallback: If no alerts found for the specific user prefix, run a broad search for recent tenant alerts
-    if (alerts.length === 0) {
-      appendLog(`No direct logs found for user prefix "${prefix}". Running broad alert search...`, 'info');
-      res = await fetch('/api/netskope/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantUrl: tenantConfig.url || undefined,
-          token: tenantConfig.token || undefined,
-          endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}`,
-          method: 'GET'
-        })
-      });
-      result = await res.json();
-      alerts = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
-    }
+    appendLog(`Scanning ${alerts.length} target-specific alerts for matches to user prefix "${prefix}"...`, 'info');
 
-    appendLog(`Scanning ${alerts.length} alert logs for matches to "${targetLower}"...`, 'info');
-    if (alerts.length > 0) {
-      const sampleAlerts = alerts.slice(0, 5).map(a => 
-        `[Target: ${a.site || a.app || a.url || 'unknown'}, Action: ${a.action || 'unknown'}]`
-      ).join(', ');
-      appendLog(`Recent alerts in tenant: ${sampleAlerts}`, 'system');
-      appendLog(`Alert Keys: ${Object.keys(alerts[0]).join(', ')}`, 'system');
-    }
-
-    // Look for standard Block alerts
+    // Find block alert matching user prefix
     matchAlert = alerts.find(a => {
-      const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
-                          (a.site || '').toLowerCase().includes(targetLower) ||
-                          (a.url || '').toLowerCase().includes(targetLower);
+      const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
       const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
-      return isSiteMatch && isBlock;
+      return isUserMatch && isBlock;
     });
 
-    // Look for SSL Decryption alerts
+    // Find SSL alert matching user prefix
     sslAlert = alerts.find(a => {
-      const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
-                          (a.site || '').toLowerCase().includes(targetLower) ||
-                          (a.url || '').toLowerCase().includes(targetLower);
+      const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
       const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
                           (a.reason || '').toLowerCase().includes('ssl') || 
                           (a.reason || '').toLowerCase().includes('handshake') ||
                           (a.reason || '').toLowerCase().includes('pinning') ||
                           (a.reason || '').toLowerCase().includes('decryption'));
-      return isSiteMatch && isSslError;
+      return isUserMatch && isSslError;
     });
 
-    // Fallback 2: If no alerts matched, search in the Page events database (datasearch/page)
+    // Fallback 2: If no alerts matched, search in the Page events database (datasearch/page) for target site
     if (!matchAlert && !sslAlert) {
-      appendLog(`No policy block alerts found. Checking raw web/page events database...`, 'info');
+      appendLog(`No direct block alerts found. Checking raw web/page events database for "${target}"...`, 'info');
       res = await fetch('/api/netskope/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenantUrl: tenantConfig.url || undefined,
           token: tenantConfig.token || undefined,
-          endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}`,
+          endpoint: `events/datasearch/page?limit=50&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`(site like '${target}' or app like '${target}' or url like '${target}')`),
           method: 'GET'
         })
       });
       result = await res.json();
       const webEvents = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
       
-      appendLog(`Scanning ${webEvents.length} page traffic events for matches to "${targetLower}"...`, 'info');
-      if (webEvents.length > 0) {
-        const sampleWeb = webEvents.slice(0, 5).map(w => 
-          `[Site: ${w.site || w.url || 'unknown'}, Action: ${w.action || 'unknown'}]`
-        ).join(', ');
-        appendLog(`Recent page events in tenant: ${sampleWeb}`, 'system');
-        appendLog(`Page Event Keys: ${Object.keys(webEvents[0]).join(', ')}`, 'system');
-      }
-
-      matchAlert = webEvents.find(w => {
-        const isSiteMatch = (w.site || '').toLowerCase().includes(targetLower) ||
-                            (w.url || '').toLowerCase().includes(targetLower) ||
-                            (w.app || '').toLowerCase().includes(targetLower);
-        const isBlock = (w.action === 'block' || w.action === 'deny' || w.action === 'blocked');
-        return isSiteMatch && isBlock;
-      });
+      appendLog(`Scanning ${webEvents.length} page traffic events for user prefix "${prefix}"...`, 'info');
       
-      if (matchAlert) {
-        matchAlert.policy = matchAlert.policy || 'Web Policy Block';
-        matchAlert.category = matchAlert.category || matchAlert.url_category || 'Blocked Category';
-        matchAlert.site = matchAlert.site || matchAlert.url;
+      const matchingPageEvent = webEvents.find(w => {
+        const isUserMatch = (w.user || w.username || '').toLowerCase().includes(prefix.toLowerCase());
+        return isUserMatch;
+      });
+
+      if (matchingPageEvent) {
+        const policyName = (matchingPageEvent.policy || '').toLowerCase();
+        if (policyName.includes('block') || policyName.includes('deny') || policyName.includes('exception')) {
+          matchAlert = {
+            policy: matchingPageEvent.policy || 'Web Policy Block',
+            category: matchingPageEvent.category || matchingPageEvent.url_category || 'Blocked Category',
+            site: matchingPageEvent.site || matchingPageEvent.url || target
+          };
+        }
       }
     }
   } catch (err) {
