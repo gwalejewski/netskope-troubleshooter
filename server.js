@@ -202,6 +202,91 @@ app.post('/api/netskope/proxy', async (req, res) => {
   }
 });
 
+// Web search crawler & knowledge engine
+app.post('/api/diagnose/search', async (req, res) => {
+  const { target, description } = req.body;
+  if (!target) {
+    return res.status(400).json({ error: 'Missing target' });
+  }
+
+  const query = `${target} ${description} ports firewall bypass netskope`.trim();
+  let snippets = [];
+  let source = "live_search";
+
+  try {
+    const response = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    
+    if (response.ok) {
+      const html = await response.text();
+      const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      let match;
+      while ((match = snippetRegex.exec(html)) !== null && snippets.length < 5) {
+        let text = match[1]
+          .replace(/<[^>]*>/g, '')
+          .replace(/&quot;/g, '"')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .trim();
+        if (text) snippets.push(text);
+      }
+    }
+  } catch (err) {
+    console.error('Web search failed:', err.message);
+  }
+
+  // Curated knowledge base fallback
+  const targetLower = target.toLowerCase();
+  const descLower = (description || '').toLowerCase();
+
+  const curatedDb = {
+    wechat: [
+      "WeChat file transfers and messages are routed to Tencent server endpoints: <code>file.wechat.com</code>, <code>szfile.wechat.com</code>, <code>szshort.wechat.com</code>, and <code>extshort.wechat.com</code>.",
+      "WeChat desktop and mobile clients enforce strict Certificate Pinning. If Netskope SSL Decryption is active on these domains, file transfers and connections will fail with handshake timeouts.",
+      "Required ports for WeChat operation: outbound TCP 80, 443, 8080 and UDP ports 8000-9000 (voice/video calls)."
+    ],
+    github: [
+      "GitHub Desktop and CLI clients use native Git ssh/https protocols and do not trust corporate SSL interception certificates by default.",
+      "Add <code>github.com</code> and <code>githubusercontent.com</code> to SSL Decryption Exceptions in Netskope to allow Git push/pull operations.",
+      "Ensure outbound SSH traffic on TCP port 22 is steered correctly if SSH authentication is utilized."
+    ],
+    zoom: [
+      "Zoom native apps utilize certificate pinning and UDP tunnels for latency optimization.",
+      "Netskope rules should bypass SSL Decryption for <code>*.zoom.us</code>, <code>*.zoom.com</code>, and Zoom CDN gateways.",
+      "Ensure firewall rules allow outbound UDP on ports 8801-8810 for real-time voice and video streams."
+    ]
+  };
+
+  let matchedCurated = [];
+  for (let key in curatedDb) {
+    if (targetLower.includes(key) || descLower.includes(key)) {
+      matchedCurated = curatedDb[key];
+      break;
+    }
+  }
+
+  if (snippets.length === 0) {
+    snippets = matchedCurated.length > 0 ? matchedCurated : [
+      `Search for "${target}" recommends verifying that the hostname is allowed in your web steering policies.`,
+      "Ensure all required TCP and UDP destination ports are open on egress firewall gateways.",
+      "Audit SSL Decryption settings to check if the target app requires certificate bypass exceptions."
+    ];
+    source = "curated_database";
+  }
+
+  res.json({
+    success: true,
+    query,
+    source,
+    snippets,
+    curated: matchedCurated
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Netskope Troubleshooter backend listening on port ${PORT}`);
 });

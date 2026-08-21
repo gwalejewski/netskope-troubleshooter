@@ -537,14 +537,31 @@ async function runLiveDiagnostics(user, target, description) {
     setHopState('dest', 'warning', 'Scan Failed');
   }
 
-  // 3. Generate AI Diagnostics Report
+  // 3. Query Web Search context engine
+  appendLog(`Searching internet database and compiling context for "${target}"...`, 'info');
+  let searchData = null;
+  try {
+    const searchRes = await fetch('/api/diagnose/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, description })
+    });
+    if (searchRes.ok) {
+      searchData = await searchRes.json();
+      appendLog(`Successfully crawled search context (Source: ${searchData.source}).`, 'success');
+    }
+  } catch (err) {
+    appendLog(`[Warning] Failed to crawl search engine context: ${err.message}`, 'warning');
+  }
+
+  // 4. Generate AI Diagnostics Report
   appendLog(`Correlating gathered telemetry and generating AI Diagnostics Report...`, 'info');
   await sleep(1000);
-  generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency);
+  generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData);
 }
 
 // --- AI LOG ANALYSIS & DIAGNOSTICS ENGINE ---
-function generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency) {
+function generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData) {
   const prefix = user.split('@')[0];
   const targetLower = target.toLowerCase();
   const descLower = description.toLowerCase();
@@ -703,6 +720,26 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     recommendations.push(`Symptom Correlation (${match.symptom}): ${match.insight}`);
   }
 
+  // 6d. Build web search findings layout if present
+  let searchHTML = "";
+  if (searchData && searchData.snippets && searchData.snippets.length > 0) {
+    const items = searchData.snippets.map(s => `<li>${s}</li>`).join('');
+    searchHTML = `
+      <div style="margin-top: 15px; margin-bottom: 15px; padding: 12px; background: rgba(0, 180, 216, 0.08); border-left: 3px solid var(--accent-light); border-radius: 4px; text-align: left;">
+        <p style="margin-bottom: 8px; font-weight: 600; font-size: 0.9em; color: var(--accent-light); display: flex; align-items: center; gap: 8px; margin-top: 0;">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" style="vertical-align: middle;">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          Web Context & Port Requirements:
+        </p>
+        <ul style="font-size: 0.85em; margin-bottom: 0; padding-left: 18px; line-height: 1.45; color: var(--text-color);">
+          ${items}
+        </ul>
+      </div>
+    `;
+  }
+
   // Render HTML
   const verdictCard = document.getElementById('verdict-card');
   const verdictContent = document.getElementById('verdict-content');
@@ -716,6 +753,7 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     <p>${diagnosis}</p>
     ${correlationNote}
     ${localLogSummary}
+    ${searchHTML}
     <p><strong>Actionable Recommendations:</strong></p>
     <ul>
       ${recsHTML}
