@@ -3,6 +3,7 @@ let tenantConfig = {
   url: '',
   token: ''
 };
+let localLogDiagnostics = null;
 
 // Sleep helper for visual log pacing
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -850,6 +851,34 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     recommendations.push(`Verify if the user's credentials or account session is expired on the target application.`);
   }
 
+  // 6b. Correlate Local Client Log analysis if available
+  let localLogSummary = "";
+  if (localLogDiagnostics) {
+    localLogSummary = `
+      <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px;">
+        <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.95em;"><i class="fas fa-file-invoice"></i> Local Client Log Audit Summary:</p>
+        <p style="font-size: 0.85em; margin-bottom: 4px;">Tunnel State: <strong>${localLogDiagnostics.tunnelState.toUpperCase()}</strong> | Gateway POP: <strong>${localLogDiagnostics.gateway || 'Unknown'}</strong> | Version: <strong>${localLogDiagnostics.version || 'Unknown'}</strong></p>
+        ${localLogDiagnostics.issues.length > 0 ? 
+          `<p style="font-size: 0.8em; margin-bottom: 0; color: #ffad33;">Found ${localLogDiagnostics.issues.length} local anomalies. Recommended actions appended below.</p>` :
+          `<p style="font-size: 0.8em; margin-bottom: 0; color: #33cc66;">No critical anomalies found in local client logs.</p>`
+        }
+      </div>
+    `;
+    
+    // Add local issues to recommendations list
+    for (let issue of localLogDiagnostics.issues) {
+      if (issue.severity === 'error') severity = 'error';
+      else if (issue.severity === 'warning' && severity !== 'error') severity = 'warning';
+      
+      recommendations.push(`Local Log Insight: ${issue.detail}`);
+    }
+    if (localLogDiagnostics.tunnelState === 'down') {
+      severity = 'error';
+      diagnosis = `Local Client steering tunnel is offline. ${diagnosis}`;
+      recommendations.push("Local Log Insight: Start or restart the local STAgent steering service on the client device.");
+    }
+  }
+
   // Render HTML
   const verdictCard = document.getElementById('verdict-card');
   const verdictContent = document.getElementById('verdict-content');
@@ -862,6 +891,7 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     <p><strong>AI Verdict Diagnosis:</strong></p>
     <p>${diagnosis}</p>
     ${correlationNote}
+    ${localLogSummary}
     <p><strong>Actionable Recommendations:</strong></p>
     <ul>
       ${recsHTML}
@@ -971,6 +1001,199 @@ toolTraceBtn.addEventListener('click', () => {
   
   showToolboxOutput(output);
 });
+
+// --- LOCAL CLIENT LOGS ANALYZER HANDLERS ---
+const nsdiagFileInput = document.getElementById('nsdiag-file');
+const nsdiagPasteArea = document.getElementById('nsdiag-paste');
+const btnAnalyzeLocalLog = document.getElementById('btn-analyze-local-log');
+
+// Handle log file upload loading
+if (nsdiagFileInput) {
+  nsdiagFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      nsdiagPasteArea.value = evt.target.result;
+    };
+    reader.readAsText(file);
+  });
+}
+
+// Parse local client logs for standard patterns
+function parseLocalClientLog(logText) {
+  const lines = logText.split('\n');
+  let issues = [];
+  let tunnelState = "unknown";
+  let detectedGateway = "unknown";
+  let detectedVersion = "unknown";
+  
+  for (let line of lines) {
+    const lineLower = line.toLowerCase();
+    
+    // Check tunnel status
+    if (lineLower.includes('tunnel_established: 0') || lineLower.includes('tunnel down') || lineLower.includes('steering disabled') || lineLower.includes('gateway connection failed')) {
+      tunnelState = "down";
+    } else if (lineLower.includes('tunnel_established: 1') || lineLower.includes('tunnel established') || lineLower.includes('steering enabled')) {
+      tunnelState = "up";
+    }
+    
+    // Check SSL/TLS issues
+    if (lineLower.includes('tls handshake error') || lineLower.includes('alert 42') || lineLower.includes('bad certificate') || lineLower.includes('certificate verify failed') || lineLower.includes('ssl pinning')) {
+      issues.push({
+        type: 'SSL/TLS Decryption Issue',
+        detail: 'Client aborted the TLS handshake with the Netskope Gateway due to certificate trust mismatch (potentially certificate pinning or missing local trust CA).',
+        severity: 'error'
+      });
+    }
+    
+    // Check DNS/DoH blocks
+    if (lineLower.includes('doh query failed') || lineLower.includes('dns lookup timeout') || lineLower.includes('dns-over-https blocked') || lineLower.includes('dns query failed')) {
+      issues.push({
+        type: 'DNS / DoH Resolution Block',
+        detail: 'DNS-over-HTTPS request was blocked or DNS resolution timed out. Client DNS steering may be impaired.',
+        severity: 'warning'
+      });
+    }
+
+    // Check Gateway Pop
+    if (lineLower.includes('connected to pop') || lineLower.includes('gateway:')) {
+      const match = line.match(/(?:pop|gateway):\s*([a-zA-Z0-9_\-]+)/i);
+      if (match) detectedGateway = match[1];
+    }
+    
+    // Check Client version
+    if (lineLower.includes('version:') || lineLower.includes('stagent version')) {
+      const match = line.match(/(?:version|stagent):\s*([0-9\.]+)/i);
+      if (match) detectedVersion = match[1];
+    }
+
+    // Check steering exceptions / bypass
+    if (lineLower.includes('bypass route') || lineLower.includes('steering exception') || lineLower.includes('bypassed')) {
+      issues.push({
+        type: 'Steering Exception Match',
+        detail: 'Traffic matched local steering bypass / exception rules, bypassing the secure tunnel directly.',
+        severity: 'info'
+      });
+    }
+  }
+
+  const uniqueIssues = [];
+  const seenTypes = new Set();
+  for (let issue of issues) {
+    if (!seenTypes.has(issue.type)) {
+      seenTypes.add(issue.type);
+      uniqueIssues.push(issue);
+    }
+  }
+  
+  return {
+    tunnelState,
+    gateway: detectedGateway === "unknown" ? null : detectedGateway,
+    version: detectedVersion === "unknown" ? null : detectedVersion,
+    issues: uniqueIssues,
+    rawLength: lines.length
+  };
+}
+
+// Standalone update of verdict card from local logs
+function updateVerdictWithLocalLogs() {
+  if (!localLogDiagnostics) return;
+  
+  const verdictCard = document.getElementById('verdict-card');
+  const verdictContent = document.getElementById('verdict-content');
+  
+  let severity = "info";
+  let diagnosis = "Local client log analysis completed.";
+  let recommendations = [];
+  
+  if (localLogDiagnostics.tunnelState === 'down') {
+    severity = "error";
+    diagnosis = "Local Client steering tunnel is <strong>Offline (DOWN)</strong>.";
+    recommendations.push("Start or restart the local Netskope STAgent client service on the target machine.");
+  }
+
+  for (let issue of localLogDiagnostics.issues) {
+    if (issue.severity === 'error') severity = 'error';
+    else if (issue.severity === 'warning' && severity !== 'error') severity = 'warning';
+    
+    recommendations.push(issue.detail);
+  }
+
+  if (recommendations.length === 0) {
+    severity = "success";
+    diagnosis = "Local client log analysis completed. Tunnel steering is active and no anomalies were detected.";
+    recommendations.push("If user issues persist, run a live scan to evaluate policies or whitelists on the Netskope tenant.");
+  }
+
+  verdictCard.className = `verdict-card ${severity} card-inner`;
+  let recsHTML = recommendations.map(r => `<li>${r}</li>`).join('');
+  
+  verdictContent.innerHTML = `
+    <p><strong>AI Verdict (Local Log Analysis):</strong></p>
+    <p>${diagnosis}</p>
+    <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px;">
+      <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.9em;"><i class="fas fa-file-invoice"></i> Local Client Log Metadata:</p>
+      <ul>
+        <li><strong>Steering Tunnel State:</strong> ${localLogDiagnostics.tunnelState.toUpperCase()}</li>
+        <li><strong>Connected Gateway POP:</strong> ${localLogDiagnostics.gateway || 'Unknown'}</li>
+        <li><strong>Steering Client Version:</strong> ${localLogDiagnostics.version || 'Unknown'}</li>
+      </ul>
+    </div>
+    <p><strong>Actionable Recommendations:</strong></p>
+    <ul>
+      ${recsHTML}
+    </ul>
+    <div class="diagnostic-meta" style="margin-top: 15px; font-size: 0.85em; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+      <span><strong>Analyzed Log Volume:</strong> ${localLogDiagnostics.rawLength} lines</span>
+    </div>
+  `;
+}
+
+// Bind local log analysis action
+if (btnAnalyzeLocalLog) {
+  btnAnalyzeLocalLog.addEventListener('click', () => {
+    const logText = nsdiagPasteArea.value.trim();
+    if (!logText) {
+      alert("Please upload a log file or paste some client logs first.");
+      return;
+    }
+
+    localLogDiagnostics = parseLocalClientLog(logText);
+    
+    // Switch workspace display
+    placeholderView.classList.add('hidden');
+    resultsView.classList.remove('hidden');
+    
+    // Log to console
+    logConsole.innerHTML = '';
+    appendLog(`[CLIENT DIAG] Running client-side log analysis on ${localLogDiagnostics.rawLength} log lines...`, 'system');
+    
+    if (localLogDiagnostics.gateway) {
+      appendLog(`[CLIENT DIAG] Connected Gateway POP: ${localLogDiagnostics.gateway}`, 'success');
+    }
+    if (localLogDiagnostics.version) {
+      appendLog(`[CLIENT DIAG] Client Version: ${localLogDiagnostics.version}`, 'info');
+    }
+
+    if (localLogDiagnostics.tunnelState === 'down') {
+      appendLog(`[CLIENT DIAG] [ERROR] Client tunnel steering was reported as DOWN / Offline.`, 'error');
+    } else if (localLogDiagnostics.tunnelState === 'up') {
+      appendLog(`[CLIENT DIAG] Client tunnel steering was reported as UP / Healthy.`, 'success');
+    }
+
+    if (localLogDiagnostics.issues.length > 0) {
+      for (let issue of localLogDiagnostics.issues) {
+        appendLog(`[CLIENT DIAG] [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.detail}`, issue.severity);
+      }
+    } else {
+      appendLog(`[CLIENT DIAG] No critical connection or SSL issues found in analyzed log lines.`, 'success');
+    }
+
+    updateVerdictWithLocalLogs();
+  });
+}
 
 // Initialization
 window.addEventListener('DOMContentLoaded', () => {
