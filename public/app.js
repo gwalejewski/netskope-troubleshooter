@@ -653,6 +653,38 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     }
   }
 
+  // 6c. Correlate keywords from user's problem description for custom troubleshooting insights
+  const issueKeywordsMatched = [];
+  if (descLower.includes('slow') || descLower.includes('latency') || descLower.includes('lag') || descLower.includes('speed') || descLower.includes('slowness')) {
+    issueKeywordsMatched.push({
+      symptom: 'Performance / Slowness',
+      insight: 'Check your local ISP connection. Netskope tunnels default to a 1350 MTU byte threshold to avoid packet fragmentation; slowness can be resolved by lowering local interface MTU or toggling the client off/on to switch to a less congested POP gateway.'
+    });
+  }
+  if (descLower.includes('timeout') || descLower.includes('timed out') || descLower.includes('unreachable') || descLower.includes('refused')) {
+    issueKeywordsMatched.push({
+      symptom: 'Connection Timeout / Failure',
+      insight: `Perform direct port connectivity tests (e.g. <code>nc -zv ${target} 443</code>) to rule out host-side web server outages or local perimeter firewall rules blocks.`
+    });
+  }
+  if (descLower.includes('internal') || descLower.includes('jira') || descLower.includes('corp') || descLower.includes('publisher') || descLower.includes('npa') || descLower.includes('private')) {
+    issueKeywordsMatched.push({
+      symptom: 'Internal NPA Routing',
+      insight: 'Ensure the destination hostname matches a Private App segment configuration in the Netskope console, and check that the assigned Publishers are online and routing correctly.'
+    });
+  }
+  if (descLower.includes('cert') || descLower.includes('ssl') || descLower.includes('handshake') || descLower.includes('security warning') || descLower.includes('pinning')) {
+    issueKeywordsMatched.push({
+      symptom: 'SSL/TLS Decryption',
+      insight: 'Verify that the local device trusts the Netskope Proxy CA Root Certificate. If the client application uses hardcoded certificate pinning (e.g. GitHub Desktop, Zoom, Dropbox), configure an SSL steering bypass rule.'
+    });
+  }
+
+  // Inject description keyword insights into recommendation list
+  for (let match of issueKeywordsMatched) {
+    recommendations.push(`Symptom Correlation (${match.symptom}): ${match.insight}`);
+  }
+
   // Render HTML
   const verdictCard = document.getElementById('verdict-card');
   const verdictContent = document.getElementById('verdict-content');
