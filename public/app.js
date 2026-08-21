@@ -129,9 +129,7 @@ diagModeRadios.forEach(radio => {
     if (e.target.value === 'live') {
       demoScenariosContainer.classList.add('hidden');
       liveBanner.classList.remove('hidden');
-      if (!tenantConfig.url || !tenantConfig.token) {
-        configDialog.showModal();
-      }
+      // Do not force show config dialog as secrets can be configured server-side
     } else {
       demoScenariosContainer.classList.remove('hidden');
       liveBanner.classList.add('hidden');
@@ -422,12 +420,7 @@ async function runSimulatedDiagnostics(user, target, description) {
 
 // --- LIVE TENANT API INTEGRATION ENGINE ---
 async function runLiveDiagnostics(user, target, description) {
-  if (!tenantConfig.url || !tenantConfig.token) {
-    appendLog('Error: Netskope Tenant settings have not been configured.', 'error');
-    throw new Error('Missing Tenant URL or Token. Click "Configure Tenant" to set credentials.');
-  }
-
-  appendLog(`Initializing Live Diagnostics scan against tenant: ${tenantConfig.url}`, 'system');
+  appendLog(`Initializing Live Diagnostics scan against tenant: ${tenantConfig.url || 'Cloudflare Environment Configuration'}`, 'system');
   await sleep(800);
 
   // Hop 1: User PC Check
@@ -440,8 +433,8 @@ async function runLiveDiagnostics(user, target, description) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tenantUrl: tenantConfig.url,
-        token: tenantConfig.token,
+        tenantUrl: tenantConfig.url || undefined,
+        token: tenantConfig.token || undefined,
         endpoint: 'steering/clients'
       })
     });
@@ -522,8 +515,8 @@ async function runLiveDiagnostics(user, target, description) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tenantUrl: tenantConfig.url,
-        token: tenantConfig.token,
+        tenantUrl: tenantConfig.url || undefined,
+        token: tenantConfig.token || undefined,
         endpoint: 'events/dataexport/alerts',
         method: 'GET'
       })
@@ -576,8 +569,8 @@ async function runLiveDiagnostics(user, target, description) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantUrl: tenantConfig.url,
-          token: tenantConfig.token,
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
           endpoint: 'infrastructure/publishers'
         })
       });
