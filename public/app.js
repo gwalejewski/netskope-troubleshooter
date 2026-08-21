@@ -753,33 +753,124 @@ async function runLiveDiagnostics(user, target, description) {
   setHopState('dest', 'active', 'Testing reachability...');
   appendLog(`Running local server gateway probe to destination [${target}]...`, 'info');
   
+  let pingSuccess = false;
+  let pingLatency = null;
+  
   try {
     const res = await fetch(`/api/diagnose/ping?target=${encodeURIComponent(target)}`);
     const pingRes = await res.json();
     
-    if (pingRes.success) {
-      appendLog(`TCP Connection check to [${target}:443] succeeded. Latency: ${pingRes.latencyMs}ms.`, 'success');
+    pingSuccess = pingRes.success;
+    pingLatency = pingRes.latencyMs;
+
+    if (pingSuccess) {
+      appendLog(`TCP Connection check to [${target}:443] succeeded. Latency: ${pingLatency}ms.`, 'success');
       setHopState('dest', 'success', 'Connected');
-      
-      verdictCard.className = 'verdict-card success card-inner';
-      verdictContent.innerHTML = `
-        <p><strong>Diagnosis:</strong> The live path analysis was successful. Connection tunnel is active and destination is reachable.</p>
-        <p><strong>Recommendation:</strong> If the user is still unable to browse, check local device parameters (e.g. browser proxies, caching, browser Extensions, or DNS over HTTPS configuration).</p>
-      `;
     } else {
       appendLog(`[ERROR] Connection test to [${target}:443] failed: ${pingRes.error}`, 'error');
       setHopState('dest', 'error', 'Unreachable');
-      
-      verdictCard.className = 'verdict-card error card-inner';
-      verdictContent.innerHTML = `
-        <p><strong>Diagnosis:</strong> The user steering and policy path is healthy, but the destination server itself is down or actively refusing connections.</p>
-        <p><strong>Recommendation:</strong> Check target web application hosting environment or locally whitelist port 443 in application firewalls.</p>
-      `;
     }
   } catch (err) {
     appendLog(`Reachability scan failed to finish: ${err.message}`, 'error');
     setHopState('dest', 'warning', 'Scan Failed');
   }
+
+  // 3. Generate AI Diagnostics Report
+  appendLog(`Correlating gathered telemetry and generating AI Diagnostics Report...`, 'info');
+  await sleep(1000);
+  generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency);
+}
+
+// --- AI LOG ANALYSIS & DIAGNOSTICS ENGINE ---
+function generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency) {
+  const prefix = user.split('@')[0];
+  const targetLower = target.toLowerCase();
+  const descLower = description.toLowerCase();
+  
+  let diagnosis = "";
+  let recommendations = [];
+  let severity = "info"; // success, warning, error
+  
+  // 1. Check for standard Web Policy Block
+  if (matchAlert) {
+    severity = "error";
+    diagnosis = `A security policy block event was captured in the Netskope tenant logs for user prefix <strong>${prefix}</strong> targeting <strong>${target}</strong>.`;
+    recommendations.push(`Modify the policy rule <code>${matchAlert.policy || 'Web Policy Block'}</code> to allow access for this user or AD group.`);
+    recommendations.push(`Add the domain <code>${target}</code> to a custom URL list used as an exception in the web steering policy.`);
+    recommendations.push(`Verify the category classification of <code>${target}</code> in the Netskope Cloud Confidence Index (CCI) to ensure it is not miscategorized.`);
+  } 
+  // 2. Check for SSL Decryption issues
+  else if (sslAlert) {
+    severity = "error";
+    diagnosis = `SSL Decryption failure detected. The client application aborted the TLS handshake with the Netskope gateway when trying to reach <strong>${target}</strong>.`;
+    recommendations.push(`Create an SSL Decryption Bypass policy (Steering Exception) for <code>${target}</code> under <strong>Settings > Steering > SSL Decryption > Exceptions</strong>.`);
+    recommendations.push(`Instruct the user to restart the client application to clear any cached SSL state once the exception is applied.`);
+  }
+  // 3. Proactive SSL Pinning risk detection (No alert log, but domain is pinned and reachability fails or user complains)
+  else {
+    const sslPinnedDomains = [
+      'dropbox.com', 'dropboxapi.com', 'zoom.us', 'github.com', 
+      'githubusercontent.com', 'microsoft.com', 'live.com', 
+      'office365.com', 'googleapis.com', 'apple.com', 'icloud.com',
+      'okta.com', 'salesforce.com', 'slack.com', 'teams.microsoft.com',
+      'box.com', 'webex.com', 'gitlub.com'
+    ];
+    const isPinned = sslPinnedDomains.some(domain => targetLower.endsWith(domain) || targetLower.includes(domain));
+    
+    if (isPinned && (descLower.includes('ssl') || descLower.includes('certificate') || descLower.includes('connection') || !pingSuccess)) {
+      severity = "warning";
+      diagnosis = `Potential SSL Decryption conflict. The destination <strong>${target}</strong> matches a known SSL-pinned application, and connection anomalies were reported.`;
+      recommendations.push(`Confirm if Netskope SSL Decryption is active for this traffic segment. If active, configure an SSL Bypass rule for <code>${target}</code>.`);
+      recommendations.push(`Verify that the Netskope Root CA Certificate is correctly installed and trusted in the user's local operating system and browser certificate stores.`);
+    }
+  }
+
+  // 4. Check for general tenant policy blocks (noise correlation)
+  let correlationNote = "";
+  const blockedAlerts = (alerts || []).filter(a => a.action === 'block' || a.action === 'deny');
+  if (blockedAlerts.length > 0) {
+    const uniqueBlockedApps = [...new Set(blockedAlerts.map(a => a.app || a.site || 'unknown'))].slice(0, 3);
+    correlationNote = `<p>💡 <strong>Tenant Security Context:</strong> We analyzed ${alerts.length} recent events and detected active block actions in your tenant targeting other services like <code>${uniqueBlockedApps.join(', ')}</code>. This indicates tenant policies are actively enforcing blocks.</p>`;
+  }
+
+  // 5. Check for reachability issues
+  if (!pingSuccess) {
+    if (severity !== 'error') severity = 'warning';
+    diagnosis = diagnosis || `The destination server for <strong>${target}</strong> is currently unreachable or timed out during direct gateway probes.`;
+    recommendations.push(`Verify if the destination application is hosting its service correctly (external DNS, web server status).`);
+    recommendations.push(`Check if local network policies or firewalls are blocking outbound traffic on port 443.`);
+  }
+
+  // 6. Default healthy path
+  if (!diagnosis) {
+    severity = "success";
+    diagnosis = `No steering blocks, SSL alerts, or reachability issues were found for user prefix <strong>${prefix}</strong> targeting <strong>${target}</strong>. The network routing path is fully functional.`;
+    recommendations.push(`Instruct the user to clear their browser cache, cookies, or try browsing using an Incognito window.`);
+    recommendations.push(`Check if the user has local browser extensions (e.g. ad blockers) or custom proxy settings that might interfere with page loading.`);
+    recommendations.push(`Verify if the user's credentials or account session is expired on the target application.`);
+  }
+
+  // Render HTML
+  const verdictCard = document.getElementById('verdict-card');
+  const verdictContent = document.getElementById('verdict-content');
+  
+  verdictCard.className = `verdict-card ${severity} card-inner`;
+  
+  let recsHTML = recommendations.map(r => `<li>${r}</li>`).join('');
+  
+  verdictContent.innerHTML = `
+    <p><strong>AI Verdict Diagnosis:</strong></p>
+    <p>${diagnosis}</p>
+    ${correlationNote}
+    <p><strong>Actionable Recommendations:</strong></p>
+    <ul>
+      ${recsHTML}
+    </ul>
+    <div class="diagnostic-meta" style="margin-top: 15px; font-size: 0.85em; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+      <span><strong>Scanned Telemetry:</strong> ${alerts.length} alerts, ${webEvents.length} page events (past 7 days) | <strong>User Device:</strong> ${clientData?.os || 'Unknown'} (${clientData?.client_version || 'N/A'})</span>
+    </div>
+  `;
+}
 }
 
 // --- MANUAL NETWORKING TOOLBOX HANDLERS ---
