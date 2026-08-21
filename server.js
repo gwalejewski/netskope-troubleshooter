@@ -262,11 +262,23 @@ app.post('/api/diagnose/search', async (req, res) => {
   };
 
   let matchedCurated = [];
+  let requiredDomains = [];
   for (let key in curatedDb) {
     if (targetLower.includes(key) || descLower.includes(key)) {
       matchedCurated = curatedDb[key];
+      if (key === 'wechat') {
+        requiredDomains = ["wechat.com", "weixiang.com", "qq.com", "file.wechat.com", "szfile.wechat.com"];
+      } else if (key === 'github') {
+        requiredDomains = ["github.com", "githubusercontent.com"];
+      } else if (key === 'zoom') {
+        requiredDomains = ["zoom.us", "zoom.com"];
+      }
       break;
     }
+  }
+
+  if (requiredDomains.length === 0) {
+    requiredDomains = [targetLower];
   }
 
   if (snippets.length === 0) {
@@ -283,7 +295,8 @@ app.post('/api/diagnose/search', async (req, res) => {
     query,
     source,
     snippets,
-    curated: matchedCurated
+    curated: matchedCurated,
+    requiredDomains
   });
 });
 

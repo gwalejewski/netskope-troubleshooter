@@ -554,14 +554,123 @@ async function runLiveDiagnostics(user, target, description) {
     appendLog(`[Warning] Failed to crawl search engine context: ${err.message}`, 'warning');
   }
 
-  // 4. Generate AI Diagnostics Report
+  // 4. Audit tenant configurations against search context requirements
+  let auditResults = [];
+  if (searchData && searchData.requiredDomains && searchData.requiredDomains.length > 0) {
+    appendLog(`[CONFIG AUDIT] Auditing Netskope tenant configurations for required domains...`, 'info');
+    
+    let steeringConfigs = [];
+    let urlLists = [];
+    
+    // Fetch steering exceptions
+    try {
+      const res = await fetch('/api/netskope/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
+          endpoint: 'steering/configuration',
+          method: 'GET'
+        })
+      });
+      const result = await res.json();
+      if (result.success) {
+        steeringConfigs = result.data?.result || result.data?.data || [];
+      }
+    } catch (err) {
+      appendLog(`[Warning] Failed to fetch steering configurations: ${err.message}`, 'warning');
+    }
+
+    // Fetch URL lists
+    try {
+      const res = await fetch('/api/netskope/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
+          endpoint: 'policy/urllist',
+          method: 'GET'
+        })
+      });
+      const result = await res.json();
+      if (result.success) {
+        urlLists = result.data?.result || result.data?.data || [];
+      }
+    } catch (err) {
+      appendLog(`[Warning] Failed to fetch policy URL lists: ${err.message}`, 'warning');
+    }
+
+    // Normalize arrays
+    const steeringArray = Array.isArray(steeringConfigs) ? steeringConfigs : (steeringConfigs.data ? (steeringConfigs.data.result || steeringConfigs.data) : [steeringConfigs]);
+    const urlListsArray = Array.isArray(urlLists) ? urlLists : (urlLists.data ? (urlLists.data.result || urlLists.data) : [urlLists]);
+
+    // Check exceptions and lists
+    for (let reqDomain of searchData.requiredDomains) {
+      let isBypassed = false;
+      let isAllowedInUrlList = false;
+      let bypassRuleName = "";
+      let urlListName = "";
+      
+      // 1. Check in steering configurations exceptions list
+      for (let cfg of steeringArray) {
+        const exceptions = cfg.exceptions || [];
+        for (let exc of exceptions) {
+          const list = exc.exception_list || [];
+          for (let item of list) {
+            const val = (item.value || item.exception_value || '').toLowerCase();
+            if (val && (reqDomain.includes(val) || val.includes(reqDomain))) {
+              isBypassed = true;
+              bypassRuleName = exc.exception_name || cfg.name || 'Steering exception';
+              break;
+            }
+          }
+          if (isBypassed) break;
+        }
+        if (isBypassed) break;
+      }
+
+      // 2. Check in URL lists
+      for (let list of urlListsArray) {
+        const urls = list.urls || [];
+        for (let u of urls) {
+          const val = u.toLowerCase();
+          if (val && (reqDomain.includes(val) || val.includes(reqDomain))) {
+            isAllowedInUrlList = true;
+            urlListName = list.name || 'URL list';
+            break;
+          }
+        }
+        if (isAllowedInUrlList) break;
+      }
+
+      auditResults.push({
+        domain: reqDomain,
+        isBypassed,
+        bypassRuleName,
+        isAllowedInUrlList,
+        urlListName
+      });
+
+      if (isBypassed) {
+        appendLog(`[CONFIG AUDIT] [OK] "${reqDomain}" matches active steering exception: "${bypassRuleName}"`, 'success');
+      } else if (isAllowedInUrlList) {
+        appendLog(`[CONFIG AUDIT] [OK] "${reqDomain}" is allowed in custom URL list: "${urlListName}"`, 'success');
+      } else {
+        appendLog(`[CONFIG AUDIT] [WARNING] "${reqDomain}" is NOT bypassed or allowed in tenant configurations.`, 'warning');
+      }
+    }
+  }
+
+  // 5. Generate AI Diagnostics Report
   appendLog(`Correlating gathered telemetry and generating AI Diagnostics Report...`, 'info');
   await sleep(1000);
-  generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData);
+  generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData, auditResults);
 }
 
 // --- AI LOG ANALYSIS & DIAGNOSTICS ENGINE ---
-function generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData) {
+function generateAIDiagnostics(user, target, description, clientData, alerts, webEvents, matchAlert, sslAlert, pingSuccess, pingLatency, searchData, auditResults) {
   const prefix = user.split('@')[0];
   const targetLower = target.toLowerCase();
   const descLower = description.toLowerCase();
@@ -718,6 +827,20 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
   // Inject description keyword insights into recommendation list
   for (let match of issueKeywordsMatched) {
     recommendations.push(`Symptom Correlation (${match.symptom}): ${match.insight}`);
+  }
+
+  // 6c-2. Audit configuration outcomes
+  if (auditResults && auditResults.length > 0) {
+    const unconfigured = auditResults.filter(r => !r.isBypassed && !r.isAllowedInUrlList);
+    if (unconfigured.length > 0) {
+      if (severity !== 'error') severity = 'warning';
+      diagnosis = diagnosis || "Netskope configuration audit warning: Some required service domains are missing from steering exceptions and allow policies.";
+      for (let item of unconfigured) {
+        recommendations.push(`Tenant Action Item: Add <code>${item.domain}</code> to the SSL Decryption Exceptions list or steering bypass rule configuration.`);
+      }
+    } else {
+      recommendations.push("Tenant Config Audited: All required service domains verified allowed or bypassed in tenant steering configuration exceptions.");
+    }
   }
 
   // 6d. Build web search findings layout if present
