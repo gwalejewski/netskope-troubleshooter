@@ -201,6 +201,13 @@ async function runLiveDiagnostics(user, target, description) {
   const prefix = user.split('@')[0].toLowerCase();
   const targetLower = target.toLowerCase();
 
+  let checkTarget = target;
+  if (targetLower === 'wechat' || targetLower.includes('wechat')) {
+    checkTarget = 'wechat.com';
+    appendLog(`[WECHAT DIAG] Service identified: Tencent WeChat (Mobile & Desktop Client). Normalizing probe target to "wechat.com".`, 'info');
+    appendLog(`[WECHAT DIAG] Identifying core service endpoints: [wechat.com, weixiang.com, qq.com]`, 'info');
+  }
+
   // 1. Gather all logs from the tenant
   setHopState('user', 'active', 'Querying...');
   appendLog(`Locating active steering records and alert logs for user [${user}]...`, 'info');
@@ -506,23 +513,23 @@ async function runLiveDiagnostics(user, target, description) {
 
   // Hop 6: End-to-End Diagnostic check using backend tools
   setHopState('dest', 'active', 'Testing reachability...');
-  appendLog(`Running local server gateway probe to destination [${target}]...`, 'info');
+  appendLog(`Running local server gateway probe to destination [${checkTarget}]...`, 'info');
   
   let pingSuccess = false;
   let pingLatency = null;
   
   try {
-    const res = await fetch(`/api/diagnose/ping?target=${encodeURIComponent(target)}`);
+    const res = await fetch(`/api/diagnose/ping?target=${encodeURIComponent(checkTarget)}`);
     const pingRes = await res.json();
     
     pingSuccess = pingRes.success;
     pingLatency = pingRes.latencyMs;
 
     if (pingSuccess) {
-      appendLog(`TCP Connection check to [${target}:443] succeeded. Latency: ${pingLatency}ms.`, 'success');
+      appendLog(`TCP Connection check to [${checkTarget}:443] succeeded. Latency: ${pingLatency}ms.`, 'success');
       setHopState('dest', 'success', 'Connected');
     } else {
-      appendLog(`[ERROR] Connection test to [${target}:443] failed: ${pingRes.error}`, 'error');
+      appendLog(`[ERROR] Connection test to [${checkTarget}:443] failed: ${pingRes.error}`, 'error');
       setHopState('dest', 'error', 'Unreachable');
     }
   } catch (err) {
@@ -578,6 +585,17 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
       recommendations.push(`Confirm if Netskope SSL Decryption is active for this traffic segment. If active, configure an SSL Bypass rule for <code>${target}</code>.`);
       recommendations.push(`Verify that the Netskope Root CA Certificate is correctly installed and trusted in the user's local operating system and browser certificate stores.`);
     }
+  }
+
+  // 3b. Special Application Normalization checks (e.g. WeChat service audits)
+  if (targetLower === 'wechat' || targetLower.includes('wechat')) {
+    if (!diagnosis) {
+      severity = "warning";
+      diagnosis = `WeChat application diagnostic audit. WeChat relies on multiple backend servers and enforces strict SSL Certificate Pinning, which fails under standard corporate SSL decryption.`;
+    }
+    recommendations.push("Add core WeChat domains (<code>wechat.com</code>, <code>weixiang.com</code>, <code>qq.com</code>) to the <strong>SSL Decryption Exception List</strong> under Steering Settings.");
+    recommendations.push("Ensure firewall rules permit outbound UDP traffic on ports 80, 443, 8080 and UDP ports 8000-9000 to enable WeChat calling features.");
+    recommendations.push("Verify client-side DNS lookup is not blocking WeChat regional servers (e.g., <code>*.weixiang.com</code> or <code>*.wechat.com</code>).");
   }
 
   // 4. Check for general tenant policy blocks (noise correlation)
