@@ -871,7 +871,6 @@ function generateAIDiagnostics(user, target, description, clientData, alerts, we
     </div>
   `;
 }
-}
 
 // --- MANUAL NETWORKING TOOLBOX HANDLERS ---
 function showToolboxOutput(text) {
