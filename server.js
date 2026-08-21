@@ -126,7 +126,9 @@ app.get('/api/diagnose/ping', (req, res) => {
 
 // Proxy to Netskope API v2
 app.post('/api/netskope/proxy', async (req, res) => {
-  const { tenantUrl, token, endpoint, method = 'GET', body = null } = req.body;
+  const tenantUrl = req.body.tenantUrl || process.env.NETSKOPE_TENANT_URL;
+  const token = req.body.token || process.env.NETSKOPE_API_TOKEN;
+  const { endpoint, method = 'GET', body = null } = req.body;
 
   if (!tenantUrl || !token || !endpoint) {
     return res.status(400).json({ error: 'Missing required Netskope configuration fields: tenantUrl, token, endpoint' });
