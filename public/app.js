@@ -328,6 +328,34 @@ async function runSimulatedDiagnostics(user, target, description) {
 
   // Policy Engine checks
   appendLog(`Evaluating Next-Gen SWG and Firewall access policies for user...`, 'info');
+  
+  if (scenario === 'ssl-decryption-failure') {
+    setHopState('policy', 'warning', 'Decrypted');
+    appendLog(`Evaluating SSL Decryption rules matching category: "Cloud Services"...`, 'info');
+    appendLog(`Netskope Proxy certificate (Netskope Root CA) injected for MITM SSL Decryption.`, 'info');
+    await sleep(1200);
+    
+    appendLog(`[ERROR] SSL Handshake aborted by client application during key exchange.`, 'error');
+    appendLog(`[TLS ALERT] Alert 42 (Bad Certificate) received from client endpoint.`, 'error');
+    appendLog(`Verification Failed: Application uses hardcoded Certificate Pinning and does not trust the Netskope Root CA.`, 'warning');
+    
+    setHopState('publisher', 'success', 'N/A');
+    setHopState('dest', 'error', 'SSL Handshake Failed');
+    
+    verdictCard.className = 'verdict-card error card-inner';
+    verdictContent.innerHTML = `
+      <p><strong>Diagnosis:</strong> The target application (<code>${target}</code>) enforces SSL/TLS Certificate Pinning and rejected the Netskope Proxy decryption certificate.</p>
+      <p><strong>Details:</strong> Standard SSL Decryption (MITM) replaces the original site certificate with a Netskope-signed CA certificate. Pinned applications detect this mismatch and terminate the handshake immediately to prevent perceived eavesdropping.</p>
+      <p><strong>Actionable Recommendations:</strong></p>
+      <ul>
+        <li>Create an <strong>SSL Decryption Bypass Policy</strong> for this domain under <strong>Settings > Steering > SSL Decryption > Exceptions</strong>.</li>
+        <li>Ensure the target domain <code>${target}</code> is added to the <strong>SSL Bypass / Do Not Decrypt</strong> group.</li>
+        <li>Instruct the user to restart the application after the bypass rule is applied in the Netskope admin tenant.</li>
+      </ul>
+    `;
+    return;
+  }
+
   if (scenario === 'url-blocked') {
     setHopState('policy', 'error', 'Blocked');
     appendLog(`[SECURITY ALERT] Request to target [${target}] matched Block Rule: "Global Social Media Policy"`, 'error');
@@ -505,6 +533,7 @@ async function runLiveDiagnostics(user, target, description) {
   appendLog(`Searching alerts database for block records matching user [${user}] and destination [${target}]...`, 'info');
   
   let matchAlert = null;
+  let sslAlert = null;
   try {
     const res = await fetch('/api/netskope/proxy', {
       method: 'POST',
@@ -520,12 +549,27 @@ async function runLiveDiagnostics(user, target, description) {
     if (result.success) {
       const alerts = Array.isArray(result.data) ? result.data : (result.data?.data || []);
       const targetLower = target.toLowerCase();
+      
+      // Look for standard Block alerts
       matchAlert = alerts.find(a => {
         const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
                             (a.site || '').toLowerCase().includes(targetLower) ||
                             (a.url || '').toLowerCase().includes(targetLower);
         const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
         return isSiteMatch && isBlock;
+      });
+
+      // Look for SSL Decryption alerts
+      sslAlert = alerts.find(a => {
+        const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
+                            (a.site || '').toLowerCase().includes(targetLower) ||
+                            (a.url || '').toLowerCase().includes(targetLower);
+        const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
+                            (a.reason || '').toLowerCase().includes('ssl') || 
+                            (a.reason || '').toLowerCase().includes('handshake') ||
+                            (a.reason || '').toLowerCase().includes('pinning') ||
+                            (a.reason || '').toLowerCase().includes('decryption'));
+        return isSiteMatch && isSslError;
       });
     }
   } catch (err) {
@@ -545,9 +589,48 @@ async function runLiveDiagnostics(user, target, description) {
       <p><strong>Action Recommendation:</strong> Create a policy override rule or modify the security group exception permissions in the policy management panel.</p>
     `;
     return;
+  } else if (sslAlert) {
+    appendLog(`[SSL ALERT] Captured SSL Decryption alert! Reason: "${sslAlert.reason || 'Handshake aborted by client'}"`, 'error');
+    setHopState('policy', 'error', 'SSL Handshake Failed');
+    setHopState('publisher', 'success', 'N/A');
+    setHopState('dest', 'error', 'TLS Failure');
+
+    verdictCard.className = 'verdict-card error card-inner';
+    verdictContent.innerHTML = `
+      <p><strong>Diagnosis:</strong> Netskope SSL Decryption is causing connection drops due to TLS verification failure.</p>
+      <p><strong>Details:</strong> The log indicates an SSL error: <code>${sslAlert.reason || 'Alert 42 / Bad Certificate'}</code>. This happens when the destination application uses Certificate Pinning or does not trust the Netskope Root CA.</p>
+      <p><strong>Actionable Recommendations:</strong></p>
+      <ul>
+        <li>Add the target host (<code>${target}</code>) to the <strong>SSL Decryption Exception list</strong> under <strong>Settings > Steering > SSL Decryption > Exceptions</strong>.</li>
+        <li>Configure the steering exception to **Bypass / Do Not Decrypt** for this domain.</li>
+      </ul>
+    `;
+    return;
   } else {
     appendLog(`No recent block events found in alerts log for user targeting "${target}".`, 'success');
-    setHopState('policy', 'success', 'Allowed');
+    
+    // Checking for SSL Decryption Certificate Pinning Risks
+    appendLog(`Checking SSL Decryption configuration & Certificate Pinning risks...`, 'info');
+    await sleep(800);
+
+    const sslPinnedDomains = [
+      'dropbox.com', 'dropboxapi.com', 'zoom.us', 'github.com', 
+      'githubusercontent.com', 'microsoft.com', 'live.com', 
+      'office365.com', 'googleapis.com', 'apple.com', 'icloud.com',
+      'okta.com', 'salesforce.com', 'slack.com', 'teams.microsoft.com',
+      'box.com', 'salesforce.com', 'webex.com', 'gitlub.com'
+    ];
+    
+    const targetLower = target.toLowerCase();
+    const isPinned = sslPinnedDomains.some(domain => targetLower.endsWith(domain) || targetLower.includes(domain));
+    
+    if (isPinned) {
+      appendLog(`[WARNING] Destination [${target}] matches a known SSL-pinned application!`, 'warning');
+      appendLog(`If Netskope SSL Decryption is active for this user, the application may drop the connection.`, 'warning');
+      setHopState('policy', 'warning', 'SSL Bypass Risk');
+    } else {
+      setHopState('policy', 'success', 'Allowed');
+    }
   }
 
   setConnectorActive('publisher', true);
