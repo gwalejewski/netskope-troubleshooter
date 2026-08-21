@@ -769,20 +769,26 @@ toolTraceBtn.addEventListener('click', () => {
 });
 
 // --- ADVANCED REMOTE CLIENT LOGS COLLECTION FLOW ---
-async function triggerClientLogPullFlow(user, target, description, activeScenario) {
-  appendLog(`[CLIENT DIAG] [ADVANCED] Requesting client agent logs collection via API for user: ${user}...`, 'system');
-  await sleep(1500);
+async function triggerClientLogPullFlow(user, target, description, activeScenario, isRetry = false) {
+  if (isRetry) {
+    appendLog(`[CLIENT DIAG] [ADVANCED] Dispatching force-refresh signal to compile fresh logs...`, 'info');
+    await sleep(2000);
+    appendLog(`[CLIENT DIAG] [ADVANCED] Remote STAgent client compiled fresh diagnostics log package.`, 'info');
+    await sleep(1500);
+    appendLog(`[CLIENT DIAG] [ADVANCED] Downloading fresh log bundle: nsdiag_refreshed_${user.split('@')[0]}.log`, 'system');
+    await sleep(1200);
+  } else {
+    appendLog(`[CLIENT DIAG] [ADVANCED] Requesting client agent logs collection via API for user: ${user}...`, 'system');
+    await sleep(1500);
+    appendLog(`[CLIENT DIAG] [ADVANCED] Signal dispatched to endpoint. Awaiting compilation status...`, 'info');
+    await sleep(1500);
+    appendLog(`[CLIENT DIAG] [ADVANCED] STAgent client compiled diagnostics log package (18.4 KB).`, 'info');
+    await sleep(1500);
+    appendLog(`[CLIENT DIAG] [ADVANCED] Downloading log bundle: nsdiag_${user.split('@')[0]}.log`, 'system');
+    await sleep(1200);
+  }
 
-  appendLog(`[CLIENT DIAG] [ADVANCED] Signal dispatched to endpoint. Awaiting compilation status...`, 'info');
-  await sleep(1500);
-
-  appendLog(`[CLIENT DIAG] [ADVANCED] STAgent client compiled diagnostics log package (18.4 KB).`, 'info');
-  await sleep(1500);
-
-  appendLog(`[CLIENT DIAG] [ADVANCED] Downloading log bundle: nsdiag_${user.split('@')[0]}.log`, 'system');
-  await sleep(1200);
-
-  const logText = generateSimulatedClientLogs(user, target, description, activeScenario);
+  const logText = generateSimulatedClientLogs(user, target, description, activeScenario, isRetry);
   localLogDiagnostics = parseLocalClientLog(logText);
 
   // Freshness check: Let's calculate log timestamp age
@@ -790,9 +796,20 @@ async function triggerClientLogPullFlow(user, target, description, activeScenari
   await sleep(800);
 
   if (localLogDiagnostics.isStale) {
-    appendLog(`[CLIENT DIAG] [WARNING] Pulled client logs are stale (generated ${localLogDiagnostics.logAgeMinutes} minutes ago). This may reflect cached telemetry.`, 'warning');
+    if (!isRetry) {
+      appendLog(`[CLIENT DIAG] [WARNING] Pulled client logs are stale (generated ${localLogDiagnostics.logAgeMinutes} minutes ago).`, 'warning');
+      // Trigger retry
+      await triggerClientLogPullFlow(user, target, description, activeScenario, true);
+      return;
+    } else {
+      appendLog(`[CLIENT DIAG] [WARNING] Retried log pull but logs are still stale. Proceeding with caution.`, 'warning');
+    }
   } else {
-    appendLog(`[CLIENT DIAG] [ADVANCED] Logs verified fresh (generated ${localLogDiagnostics.logAgeSeconds} seconds ago).`, 'success');
+    if (isRetry) {
+      appendLog(`[CLIENT DIAG] [ADVANCED] Fresh logs successfully compiled and retrieved on retry! (generated ${localLogDiagnostics.logAgeSeconds} seconds ago).`, 'success');
+    } else {
+      appendLog(`[CLIENT DIAG] [ADVANCED] Logs verified fresh (generated ${localLogDiagnostics.logAgeSeconds} seconds ago).`, 'success');
+    }
   }
 
   appendLog(`[CLIENT DIAG] Successfully parsed client logs! Gateway: ${localLogDiagnostics.gateway || 'Chicago_US (ORD-1)'} | Version: ${localLogDiagnostics.version || '104.2.1.849'}`, 'success');
@@ -809,9 +826,9 @@ async function triggerClientLogPullFlow(user, target, description, activeScenari
 }
 
 // Generate realistic client log lines matching scenario and configuration
-function generateSimulatedClientLogs(user, target, description, scenario) {
+function generateSimulatedClientLogs(user, target, description, scenario, isRetry = false) {
   let logTimeOffset = 0;
-  if (description.toLowerCase().includes('stale') || target.toLowerCase().includes('stale')) {
+  if (!isRetry && (description.toLowerCase().includes('stale') || target.toLowerCase().includes('stale'))) {
     logTimeOffset = 12 * 60 * 1000; // 12 minutes ago (stale check simulation)
   }
   
