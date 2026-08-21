@@ -450,6 +450,9 @@ async function runSimulatedDiagnostics(user, target, description) {
 async function runLiveDiagnostics(user, target, description) {
   appendLog(`Initializing Live Diagnostics scan against tenant: ${tenantConfig.url || 'Cloudflare Environment Configuration'}`, 'system');
   await sleep(800);
+  
+  const endtime = Math.floor(Date.now() / 1000);
+  const starttime = endtime - 7 * 24 * 60 * 60; // Look back 7 days for logs
 
   // Hop 1: User PC Check
   appendLog(`Locating active steering records for user [${user}]...`, 'info');
@@ -463,7 +466,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: 'events/datasearch/clientstatus?limit=5&query=' + encodeURIComponent("user like '" + user.split('@')[0] + "'")
+        endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}`
       })
     });
     
@@ -472,15 +475,26 @@ async function runLiveDiagnostics(user, target, description) {
     
     // Scan for user
     const clients = Array.isArray(result.data) ? result.data : (result.data?.data || []);
-    clientData = clients[0]; // Get the latest client status event
+    const prefix = user.split('@')[0].toLowerCase();
+    
+    clientData = clients.find(c => {
+      const dbUser = (c.user || c.username || c.user_name || '').toLowerCase();
+      return dbUser.includes(prefix) || prefix.includes(dbUser);
+    });
 
     if (!clientData) {
-      appendLog(`[WARNING] No active client registration found matching user query "${user}".`, 'warning');
+      appendLog(`[WARNING] No active client registration found matching user prefix "${prefix}" in last 7 days.`, 'warning');
       setHopState('user', 'warning', 'No Record');
+      
+      const uniqueUsers = [...new Set(clients.map(c => c.user || c.username || 'unknown'))].slice(0, 5);
+      if (uniqueUsers.length > 0) {
+        appendLog(`Recent users in tenant clientstatus logs: [${uniqueUsers.join(', ')}]`, 'system');
+      }
     } else {
       const host = clientData.hostname || clientData.host_name || clientData.device_name || 'Generic Device';
       const osSystem = clientData.os || clientData.os_version || 'Unknown';
-      appendLog(`Successfully located client device: ${host} (OS: ${osSystem})`, 'success');
+      const activeUser = clientData.user || clientData.username || user;
+      appendLog(`Successfully located client device: ${host} (OS: ${osSystem}, User: ${activeUser})`, 'success');
       setHopState('user', 'success', 'Verified');
     }
   } catch (err) {
@@ -535,43 +549,63 @@ async function runLiveDiagnostics(user, target, description) {
   let matchAlert = null;
   let sslAlert = null;
   try {
-    const res = await fetch('/api/netskope/proxy', {
+    const prefix = user.split('@')[0];
+    const targetLower = target.toLowerCase();
+    
+    // Pass 1: Query by specific user prefix (7-day window)
+    let res = await fetch('/api/netskope/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: 'events/datasearch/alert?limit=50&query=' + encodeURIComponent("user like '" + user.split('@')[0] + "'"),
+        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
         method: 'GET'
       })
     });
-    const result = await res.json();
-    if (result.success) {
-      const alerts = Array.isArray(result.data) ? result.data : (result.data?.data || []);
-      const targetLower = target.toLowerCase();
-      
-      // Look for standard Block alerts
-      matchAlert = alerts.find(a => {
-        const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
-                            (a.site || '').toLowerCase().includes(targetLower) ||
-                            (a.url || '').toLowerCase().includes(targetLower);
-        const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
-        return isSiteMatch && isBlock;
+    let result = await res.json();
+    let alerts = result.success ? (Array.isArray(result.data) ? result.data : (result.data?.data || [])) : [];
+    
+    // Fallback: If no alerts found for the specific user prefix, run a broad search for recent tenant alerts
+    if (alerts.length === 0) {
+      appendLog(`No direct logs found for user prefix "${prefix}". Running broad alert search...`, 'info');
+      res = await fetch('/api/netskope/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
+          endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}`,
+          method: 'GET'
+        })
       });
-
-      // Look for SSL Decryption alerts
-      sslAlert = alerts.find(a => {
-        const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
-                            (a.site || '').toLowerCase().includes(targetLower) ||
-                            (a.url || '').toLowerCase().includes(targetLower);
-        const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
-                            (a.reason || '').toLowerCase().includes('ssl') || 
-                            (a.reason || '').toLowerCase().includes('handshake') ||
-                            (a.reason || '').toLowerCase().includes('pinning') ||
-                            (a.reason || '').toLowerCase().includes('decryption'));
-        return isSiteMatch && isSslError;
-      });
+      result = await res.json();
+      alerts = result.success ? (Array.isArray(result.data) ? result.data : (result.data?.data || [])) : [];
     }
+
+    appendLog(`Scanning ${alerts.length} alert logs for matches to "${targetLower}"...`, 'info');
+
+    // Look for standard Block alerts
+    matchAlert = alerts.find(a => {
+      const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
+                          (a.site || '').toLowerCase().includes(targetLower) ||
+                          (a.url || '').toLowerCase().includes(targetLower);
+      const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
+      return isSiteMatch && isBlock;
+    });
+
+    // Look for SSL Decryption alerts
+    sslAlert = alerts.find(a => {
+      const isSiteMatch = (a.app || '').toLowerCase().includes(targetLower) ||
+                          (a.site || '').toLowerCase().includes(targetLower) ||
+                          (a.url || '').toLowerCase().includes(targetLower);
+      const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
+                          (a.reason || '').toLowerCase().includes('ssl') || 
+                          (a.reason || '').toLowerCase().includes('handshake') ||
+                          (a.reason || '').toLowerCase().includes('pinning') ||
+                          (a.reason || '').toLowerCase().includes('decryption'));
+      return isSiteMatch && isSslError;
+    });
   } catch (err) {
     appendLog(`[Warning] Could not scan live policy alerts database: ${err.message}`, 'warning');
   }
