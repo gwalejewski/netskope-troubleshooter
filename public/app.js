@@ -474,7 +474,7 @@ async function runLiveDiagnostics(user, target, description) {
     if (!result.success) throw new Error(result.error || 'Failed to fetch client status');
     
     // Scan for user
-    const clients = Array.isArray(result.data) ? result.data : (result.data?.data || []);
+    const clients = result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []));
     const prefix = user.split('@')[0].toLowerCase();
     
     clientData = clients.find(c => {
@@ -564,7 +564,7 @@ async function runLiveDiagnostics(user, target, description) {
       })
     });
     let result = await res.json();
-    let alerts = result.success ? (Array.isArray(result.data) ? result.data : (result.data?.data || [])) : [];
+    let alerts = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
     
     // Fallback: If no alerts found for the specific user prefix, run a broad search for recent tenant alerts
     if (alerts.length === 0) {
@@ -580,7 +580,7 @@ async function runLiveDiagnostics(user, target, description) {
         })
       });
       result = await res.json();
-      alerts = result.success ? (Array.isArray(result.data) ? result.data : (result.data?.data || [])) : [];
+      alerts = result.success ? (result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []))) : [];
     }
 
     appendLog(`Scanning ${alerts.length} alert logs for matches to "${targetLower}"...`, 'info');
