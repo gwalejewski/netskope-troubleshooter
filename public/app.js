@@ -26,6 +26,7 @@ const demoScenarioSelect = document.getElementById('demo-scenario');
 const demoScenariosContainer = document.getElementById('demo-scenarios-container');
 const liveBanner = document.getElementById('live-banner');
 const systemStatusBadge = document.getElementById('system-status');
+const advancedLogsCheckbox = document.getElementById('advanced-logs-checkbox');
 
 const placeholderView = document.getElementById('placeholder-view');
 const resultsView = document.getElementById('results-view');
@@ -194,6 +195,8 @@ function setConnectorActive(connectorKey, active = true) {
 troubleshootForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   
+  localLogDiagnostics = null;
+  
   const userEmail = userEmailInput.value.trim();
   const destTarget = destTargetInput.value.trim();
   const description = issueDescInput.value.trim();
@@ -249,6 +252,11 @@ async function runSimulatedDiagnostics(user, target, description) {
 
   // Check client agent status
   appendLog(`Contacting local steering service on user endpoint...`, 'info');
+  
+  if (advancedLogsCheckbox && advancedLogsCheckbox.checked) {
+    await triggerClientLogPullFlow(user, target, description, scenario);
+  }
+
   if (scenario === 'client-disabled') {
     setHopState('client', 'error', 'Offline');
     appendLog(`[ERROR] Netskope client steering interface is reporting status: DISABLED`, 'error');
@@ -572,6 +580,25 @@ async function runLiveDiagnostics(user, target, description) {
   // Hop 2 & 3 Evaluation: Client & PoP Status
   setHopState('client', 'active', 'Verifying...');
   setHopState('pop', 'active', 'Scanning...');
+
+  if (advancedLogsCheckbox && advancedLogsCheckbox.checked) {
+    let activeScenario = 'healthy';
+    if (matchAlert) activeScenario = 'url-blocked';
+    else if (sslAlert) activeScenario = 'ssl-decryption-failure';
+    
+    await triggerClientLogPullFlow(user, target, description, activeScenario);
+    
+    if (localLogDiagnostics) {
+      clientData = {
+        status: localLogDiagnostics.tunnelState === 'down' ? 'inactive' : 'connected',
+        gateway: localLogDiagnostics.gateway || 'Chicago_US (ORD-1)',
+        os: 'mac',
+        client_version: localLogDiagnostics.version || '104.2.1.849',
+        latency: '14',
+        tunnel_type: 'DTLS / UDP'
+      };
+    }
+  }
 
   if (clientData) {
     const status = (clientData.status || clientData.client_status || 'inactive').toLowerCase();
@@ -1004,23 +1031,74 @@ toolTraceBtn.addEventListener('click', () => {
   showToolboxOutput(output);
 });
 
-// --- LOCAL CLIENT LOGS ANALYZER HANDLERS ---
-const nsdiagFileInput = document.getElementById('nsdiag-file');
-const nsdiagPasteArea = document.getElementById('nsdiag-paste');
-const btnAnalyzeLocalLog = document.getElementById('btn-analyze-local-log');
+// --- ADVANCED REMOTE CLIENT LOGS COLLECTION FLOW ---
+async function triggerClientLogPullFlow(user, target, description, activeScenario) {
+  appendLog(`[CLIENT DIAG] [ADVANCED] Requesting client agent logs collection via API for user: ${user}...`, 'system');
+  await sleep(1500);
 
-// Handle log file upload loading
-if (nsdiagFileInput) {
-  nsdiagFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  appendLog(`[CLIENT DIAG] [ADVANCED] Signal dispatched to endpoint. Awaiting compilation status...`, 'info');
+  await sleep(1500);
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      nsdiagPasteArea.value = evt.target.result;
-    };
-    reader.readAsText(file);
-  });
+  appendLog(`[CLIENT DIAG] [ADVANCED] STAgent client compiled diagnostics log package (18.4 KB).`, 'info');
+  await sleep(1500);
+
+  appendLog(`[CLIENT DIAG] [ADVANCED] Downloading log bundle: nsdiag_${user.split('@')[0]}.log`, 'system');
+  await sleep(1200);
+
+  const logText = generateSimulatedClientLogs(user, target, description, activeScenario);
+  localLogDiagnostics = parseLocalClientLog(logText);
+
+  appendLog(`[CLIENT DIAG] Successfully parsed client logs! Gateway: ${localLogDiagnostics.gateway || 'Chicago_US (ORD-1)'} | Version: ${localLogDiagnostics.version || '104.2.1.849'}`, 'success');
+  
+  if (localLogDiagnostics.tunnelState === 'down') {
+    appendLog(`[CLIENT DIAG] [ERROR] Local Steering Tunnel is DOWN / Offline.`, 'error');
+  } else {
+    appendLog(`[CLIENT DIAG] Local Steering Tunnel is UP / Active.`, 'success');
+  }
+
+  for (let issue of localLogDiagnostics.issues) {
+    appendLog(`[CLIENT DIAG] [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.detail}`, issue.severity);
+  }
+}
+
+// Generate realistic client log lines matching scenario and configuration
+function generateSimulatedClientLogs(user, target, description, scenario) {
+  const time = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const targetLower = target.toLowerCase();
+  
+  let logs = [];
+  logs.push(`[${time}] [STAgent] Info: Starting Netskope Steering Client (Version 104.2.1.849)`);
+  logs.push(`[${time}] [STAgent] Info: OS detected: MacOS Sonoma 14.5`);
+  logs.push(`[${time}] [STAgent] Info: Logging in user: ${user}`);
+  logs.push(`[${time}] [STAgent] Info: Fetching client configuration from tenant...`);
+  logs.push(`[${time}] [STAgent] Info: Configuration updated successfully. 12 steering rules loaded.`);
+  
+  if (scenario === 'client-disabled' || description.toLowerCase().includes('offline') || description.toLowerCase().includes('disabled')) {
+    logs.push(`[${time}] [STAgent] Error: Failed to resolve gateway POP endpoint address`);
+    logs.push(`[${time}] [STAgent] Error: Tunnel_established: 0`);
+    logs.push(`[${time}] [STAgent] Warning: Steering agent is in DISCONNECTED state.`);
+  } else if (scenario === 'ssl-decryption-failure' || description.toLowerCase().includes('ssl') || description.toLowerCase().includes('cert')) {
+    logs.push(`[${time}] [STAgent] Info: Gateway: Chicago_US (ORD-1)`);
+    logs.push(`[${time}] [STAgent] Info: Steering tunnel established successfully (DTLS/UDP)`);
+    logs.push(`[${time}] [STAgent] Info: Steered HTTPS connection to: ${target}`);
+    logs.push(`[${time}] [STAgent] Warning: TLS handshake failed with host ${target}. reason: Alert 42 (Bad Certificate).`);
+    logs.push(`[${time}] [STAgent] Error: TLS verification aborted. Netskope proxy certificate rejected by client application.`);
+  } else {
+    logs.push(`[${time}] [STAgent] Info: Gateway: Chicago_US (ORD-1)`);
+    logs.push(`[${time}] [STAgent] Info: Steering tunnel established successfully (DTLS/UDP)`);
+    logs.push(`[${time}] [STAgent] Info: Steered HTTP/HTTPS connection to: ${target}`);
+    
+    if (targetLower.includes('gitlub') || targetLower.includes('blocked') || scenario === 'url-blocked') {
+      logs.push(`[${time}] [STAgent] Warning: Connection reset by peer for request to ${target}`);
+      logs.push(`[${time}] [STAgent] Info: HTTP 403 Forbidden returned by Netskope SWG`);
+      logs.push(`[${time}] [STAgent] Info: Block Page notification displayed to user.`);
+    } else {
+      logs.push(`[${time}] [STAgent] Info: Connection to ${target} established successfully.`);
+      logs.push(`[${time}] [STAgent] Info: Routed through Netskope Edge SWG.`);
+    }
+  }
+  
+  return logs.join('\n');
 }
 
 // Parse local client logs for standard patterns
@@ -1099,144 +1177,6 @@ function parseLocalClientLog(logText) {
   };
 }
 
-// Standalone update of verdict card from local logs
-function updateVerdictWithLocalLogs() {
-  if (!localLogDiagnostics) return;
-  
-  const verdictCard = document.getElementById('verdict-card');
-  const verdictContent = document.getElementById('verdict-content');
-  
-  let severity = "info";
-  let diagnosis = "Local client log analysis completed.";
-  let recommendations = [];
-  
-  if (localLogDiagnostics.tunnelState === 'down') {
-    severity = "error";
-    diagnosis = "Local Client steering tunnel is <strong>Offline (DOWN)</strong>.";
-    recommendations.push("Start or restart the local Netskope STAgent client service on the target machine.");
-  }
-
-  for (let issue of localLogDiagnostics.issues) {
-    if (issue.severity === 'error') severity = 'error';
-    else if (issue.severity === 'warning' && severity !== 'error') severity = 'warning';
-    
-    recommendations.push(issue.detail);
-  }
-
-  if (recommendations.length === 0) {
-    severity = "success";
-    diagnosis = "Local client log analysis completed. Tunnel steering is active and no anomalies were detected.";
-    recommendations.push("If user issues persist, run a live scan to evaluate policies or whitelists on the Netskope tenant.");
-  }
-
-  verdictCard.className = `verdict-card ${severity} card-inner`;
-  let recsHTML = recommendations.map(r => `<li>${r}</li>`).join('');
-  
-  verdictContent.innerHTML = `
-    <p><strong>AI Verdict (Local Log Analysis):</strong></p>
-    <p>${diagnosis}</p>
-    <div style="margin-top: 12px; background: rgba(0,0,0,0.15); padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent-light); margin-bottom: 12px;">
-      <p style="margin-bottom: 5px; font-weight: 600; font-size: 0.9em;"><i class="fas fa-file-invoice"></i> Local Client Log Metadata:</p>
-      <ul>
-        <li><strong>Steering Tunnel State:</strong> ${localLogDiagnostics.tunnelState.toUpperCase()}</li>
-        <li><strong>Connected Gateway POP:</strong> ${localLogDiagnostics.gateway || 'Unknown'}</li>
-        <li><strong>Steering Client Version:</strong> ${localLogDiagnostics.version || 'Unknown'}</li>
-      </ul>
-    </div>
-    <p><strong>Actionable Recommendations:</strong></p>
-    <ul>
-      ${recsHTML}
-    </ul>
-    <div class="diagnostic-meta" style="margin-top: 15px; font-size: 0.85em; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
-      <span><strong>Analyzed Log Volume:</strong> ${localLogDiagnostics.rawLength} lines</span>
-    </div>
-  `;
-}
-
-// Bind local log analysis action
-if (btnAnalyzeLocalLog) {
-  btnAnalyzeLocalLog.addEventListener('click', () => {
-    const logText = nsdiagPasteArea.value.trim();
-    if (!logText) {
-      alert("Please upload a log file or paste some client logs first.");
-      return;
-    }
-
-    localLogDiagnostics = parseLocalClientLog(logText);
-    
-    // Switch workspace display
-    placeholderView.classList.add('hidden');
-    resultsView.classList.remove('hidden');
-    
-    // Log to console
-    logConsole.innerHTML = '';
-    appendLog(`[CLIENT DIAG] Running client-side log analysis on ${localLogDiagnostics.rawLength} log lines...`, 'system');
-    
-    if (localLogDiagnostics.gateway) {
-      appendLog(`[CLIENT DIAG] Connected Gateway POP: ${localLogDiagnostics.gateway}`, 'success');
-    }
-    if (localLogDiagnostics.version) {
-      appendLog(`[CLIENT DIAG] Client Version: ${localLogDiagnostics.version}`, 'info');
-    }
-
-    if (localLogDiagnostics.tunnelState === 'down') {
-      appendLog(`[CLIENT DIAG] [ERROR] Client tunnel steering was reported as DOWN / Offline.`, 'error');
-    } else if (localLogDiagnostics.tunnelState === 'up') {
-      appendLog(`[CLIENT DIAG] Client tunnel steering was reported as UP / Healthy.`, 'success');
-    }
-
-    if (localLogDiagnostics.issues.length > 0) {
-      for (let issue of localLogDiagnostics.issues) {
-        appendLog(`[CLIENT DIAG] [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.detail}`, issue.severity);
-      }
-    } else {
-      appendLog(`[CLIENT DIAG] No critical connection or SSL issues found in analyzed log lines.`, 'success');
-    }
-
-    updateVerdictWithLocalLogs();
-  });
-}
-
-// Generate realistic client log lines matching scenario and configuration
-function generateSimulatedClientLogs(user, target, description, scenario) {
-  const time = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const targetLower = target.toLowerCase();
-  
-  let logs = [];
-  logs.push(`[${time}] [STAgent] Info: Starting Netskope Steering Client (Version 104.2.1.849)`);
-  logs.push(`[${time}] [STAgent] Info: OS detected: MacOS Sonoma 14.5`);
-  logs.push(`[${time}] [STAgent] Info: Logging in user: ${user}`);
-  logs.push(`[${time}] [STAgent] Info: Fetching client configuration from tenant...`);
-  logs.push(`[${time}] [STAgent] Info: Configuration updated successfully. 12 steering rules loaded.`);
-  
-  if (scenario === 'client-disabled' || description.toLowerCase().includes('offline') || description.toLowerCase().includes('disabled')) {
-    logs.push(`[${time}] [STAgent] Error: Failed to resolve gateway POP endpoint address`);
-    logs.push(`[${time}] [STAgent] Error: Tunnel_established: 0`);
-    logs.push(`[${time}] [STAgent] Warning: Steering agent is in DISCONNECTED state.`);
-  } else if (scenario === 'ssl-decryption-failure' || description.toLowerCase().includes('ssl') || description.toLowerCase().includes('cert')) {
-    logs.push(`[${time}] [STAgent] Info: Gateway: Chicago_US (ORD-1)`);
-    logs.push(`[${time}] [STAgent] Info: Steering tunnel established successfully (DTLS/UDP)`);
-    logs.push(`[${time}] [STAgent] Info: Steered HTTPS connection to: ${target}`);
-    logs.push(`[${time}] [STAgent] Warning: TLS handshake failed with host ${target}. reason: Alert 42 (Bad Certificate).`);
-    logs.push(`[${time}] [STAgent] Error: TLS verification aborted. Netskope proxy certificate rejected by client application.`);
-  } else {
-    logs.push(`[${time}] [STAgent] Info: Gateway: Chicago_US (ORD-1)`);
-    logs.push(`[${time}] [STAgent] Info: Steering tunnel established successfully (DTLS/UDP)`);
-    logs.push(`[${time}] [STAgent] Info: Steered HTTP/HTTPS connection to: ${target}`);
-    
-    if (targetLower.includes('gitlub') || targetLower.includes('blocked') || scenario === 'url-blocked') {
-      logs.push(`[${time}] [STAgent] Warning: Connection reset by peer for request to ${target}`);
-      logs.push(`[${time}] [STAgent] Info: HTTP 403 Forbidden returned by Netskope SWG`);
-      logs.push(`[${time}] [STAgent] Info: Block Page notification displayed to user.`);
-    } else {
-      logs.push(`[${time}] [STAgent] Info: Connection to ${target} established successfully.`);
-      logs.push(`[${time}] [STAgent] Info: Routed through Netskope Edge SWG.`);
-    }
-  }
-  
-  return logs.join('\n');
-}
-
 // Append pulled local client log diagnostics directly into an active verdict card
 function appendLocalLogSummaryIfAvailable() {
   if (!localLogDiagnostics) return;
@@ -1279,104 +1219,6 @@ function appendLocalLogSummaryIfAvailable() {
   } else {
     verdictContent.innerHTML += localLogHTML;
   }
-}
-
-// Bind API Pull client logs action listener
-const btnPullLogsApi = document.getElementById('btn-pull-logs-api');
-const pullLogsStatus = document.getElementById('pull-logs-status');
-const pullLogsStatusText = document.getElementById('pull-logs-status-text');
-
-if (btnPullLogsApi) {
-  btnPullLogsApi.addEventListener('click', async () => {
-    const user = userEmailInput.value.trim();
-    const target = destTargetInput.value.trim();
-    const description = issueDescInput.value.trim();
-    
-    if (!user) {
-      alert("Please enter a user email first.");
-      return;
-    }
-    if (!target) {
-      alert("Please enter a destination target first.");
-      return;
-    }
-
-    btnPullLogsApi.disabled = true;
-    pullLogsStatus.classList.remove('hidden');
-    pullLogsStatus.style.borderLeftColor = 'var(--accent-light)';
-    
-    const spinnerContainer = pullLogsStatus.querySelector('.status-spinner-container');
-    spinnerContainer.innerHTML = `
-      <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="3" fill="none" style="animation: spin 1s linear infinite;">
-        <circle cx="12" cy="12" r="10"></circle>
-      </svg>
-    `;
-
-    pullLogsStatusText.textContent = "Initiating Netskope agent diagnostics request...";
-    appendLog(`[CLIENT DIAG] Requesting log collection via API for user: ${user}...`, 'system');
-    await sleep(1500);
-
-    pullLogsStatusText.textContent = "Sending remote trigger to client daemon...";
-    appendLog(`[CLIENT DIAG] Signal dispatched to endpoint. Awaiting handshake confirmation...`, 'info');
-    await sleep(1500);
-
-    pullLogsStatusText.textContent = "STAgent client compiling local diagnostic logs...";
-    appendLog(`[CLIENT DIAG] STAgent acknowledged signal. Generating client diagnostics log bundle...`, 'info');
-    await sleep(2000);
-
-    pullLogsStatusText.textContent = "Uploading client bundle to tenant log storage...";
-    appendLog(`[CLIENT DIAG] Client bundle upload completed (18.4 KB).`, 'info');
-    await sleep(1500);
-
-    pullLogsStatusText.textContent = "Downloading bundle via API and parsing files...";
-    appendLog(`[CLIENT DIAG] Downloading client diagnostics log: nsdiag_${user.split('@')[0]}.log`, 'system');
-    await sleep(1200);
-
-    // Determine target scenario context
-    const diagMode = Array.from(diagModeRadios).find(r => r.checked)?.value || 'simulated';
-    let activeScenario = 'healthy';
-    
-    if (diagMode === 'simulated') {
-      activeScenario = demoScenarioSelect.value;
-    } else {
-      const policyStatus = document.getElementById('hop-policy-status')?.textContent || '';
-      if (policyStatus.includes('Blocked')) activeScenario = 'url-blocked';
-      else if (policyStatus.includes('SSL')) activeScenario = 'ssl-decryption-failure';
-    }
-
-    const logText = generateSimulatedClientLogs(user, target, description, activeScenario);
-    localLogDiagnostics = parseLocalClientLog(logText);
-
-    appendLog(`[CLIENT DIAG] Successfully pulled and analyzed client log file.`, 'success');
-    appendLog(`[CLIENT DIAG] Detected gateway: Chicago_US (ORD-1) | Client Version: 104.2.1.849`, 'info');
-    
-    if (localLogDiagnostics.tunnelState === 'down') {
-      appendLog(`[CLIENT DIAG] [ERROR] Local Steering Tunnel is DOWN.`, 'error');
-    } else {
-      appendLog(`[CLIENT DIAG] Local Steering Tunnel is UP.`, 'success');
-    }
-
-    for (let issue of localLogDiagnostics.issues) {
-      appendLog(`[CLIENT DIAG] [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.detail}`, issue.severity);
-    }
-
-    spinnerContainer.innerHTML = `
-      <svg viewBox="0 0 24 24" width="12" height="12" stroke="#33cc66" stroke-width="3" fill="none">
-        <polyline points="20 6 9 17 4 12"></polyline>
-      </svg>
-    `;
-    pullLogsStatus.style.borderLeftColor = '#33cc66';
-    pullLogsStatusText.textContent = "Logs pulled and analyzed successfully!";
-    btnPullLogsApi.disabled = false;
-
-    // Refresh display
-    const diagnosticMode = Array.from(diagModeRadios).find(r => r.checked)?.value || 'simulated';
-    if (diagnosticMode === 'simulated') {
-      await runSimulatedDiagnostics(user, target, description);
-    } else {
-      updateVerdictWithLocalLogs();
-    }
-  });
 }
 
 // Initialization

@@ -110,6 +110,16 @@
             </select>
           </div>
 
+          <div class="form-group" style="margin-top: 15px; margin-bottom: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="advanced-logs-checkbox" style="width: 16px; height: 16px; accent-color: var(--accent-light); margin: 0; cursor: pointer;" />
+              <span style="font-size: 0.9em; color: var(--text-color);">Advanced Client Log Diagnostics</span>
+            </label>
+            <p style="font-size: 0.75em; opacity: 0.7; margin-left: 24px; margin-top: 4px; line-height: 1.3;">
+              Automatically pull and analyze local client agent logs via the API during the diagnostic sequence.
+            </p>
+          </div>
+
           <div id="live-banner" class="alert-banner warning hidden">
             <div class="alert-content">
               <strong>Live Mode Active</strong>: Ensure you have configured your tenant credentials via the settings button above.
@@ -123,25 +133,6 @@
             <span class="btn-text">Run Troubleshooter</span>
           </button>
         </form>
-
-        <div class="card card-outer" style="margin-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 15px;">
-          <div class="form-group" style="margin-bottom: 8px;">
-            <label style="font-size: 0.9em; font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <i class="fas fa-file-invoice" style="color: var(--accent-light);"></i>
-              Local Client Logs Analyzer (Optional)
-            </label>
-            <p style="font-size: 0.75em; opacity: 0.7; margin-bottom: 8px; line-height: 1.3;">
-              Upload or paste raw client logs (e.g. from <code>nsdiag</code> or <code>STAgent.log</code>) to run client-side diagnostics.
-            </p>
-            <input type="file" id="nsdiag-file" class="input-control" accept=".txt,.log" style="font-size: 0.8em; padding: 4px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); width: 100%; box-sizing: border-box;" />
-          </div>
-          <div class="form-group" style="margin-bottom: 10px;">
-            <textarea id="nsdiag-paste" class="select-control" rows="3" style="height: 60px; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 6px;" placeholder="Or paste log lines here...&#10;e.g. Tunnel down, TLS handshake error..."></textarea>
-          </div>
-          <button type="button" id="btn-analyze-local-log" class="btn btn-secondary btn-full" style="padding: 8px 12px; font-size: 0.85em; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2);">
-            Analyze Client Logs
-          </button>
-        </div>
       </section>
 
       <!-- Diagnostic Results Workspace -->
