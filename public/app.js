@@ -259,7 +259,7 @@ async function runLiveDiagnostics(user, target, description) {
         body: JSON.stringify({
           tenantUrl: tenantConfig.url || undefined,
           token: tenantConfig.token || undefined,
-          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`)
+          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`)
         })
       });
       const result = await res.json();
@@ -279,7 +279,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`),
+        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
         method: 'GET'
       })
     });
@@ -299,7 +299,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`),
+        endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
         method: 'GET'
       })
     });
