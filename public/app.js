@@ -231,7 +231,7 @@ async function runLiveDiagnostics(user, target, description) {
   let alerts = [];
   let webEvents = [];
 
-  // Fetch client status change logs
+  // Fetch live steering clients registry (primary) or status change logs (fallback)
   try {
     const res = await fetch('/api/netskope/proxy', {
       method: 'POST',
@@ -239,15 +239,36 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}`
+        endpoint: 'steering/clients',
+        method: 'GET'
       })
     });
     const result = await res.json();
     if (result.success) {
-      clients = result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []));
+      clients = result.data?.result || result.data?.data || (Array.isArray(result.data) ? result.data : []);
     }
   } catch (err) {
-    appendLog(`[Warning] Failed to fetch client status: ${err.message}`, 'warning');
+    appendLog(`[Warning] Failed to query live client registry: ${err.message}. Trying status logs fallback...`, 'info');
+  }
+
+  if (!clients || clients.length === 0) {
+    try {
+      const res = await fetch('/api/netskope/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantUrl: tenantConfig.url || undefined,
+          token: tenantConfig.token || undefined,
+          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}`
+        })
+      });
+      const result = await res.json();
+      if (result.success) {
+        clients = result.data?.result || (Array.isArray(result.data) ? result.data : (result.data?.data || []));
+      }
+    } catch (err) {
+      appendLog(`[Warning] Failed to fetch client status logs fallback: ${err.message}`, 'warning');
+    }
   }
 
   // Fetch alerts matching target
@@ -323,7 +344,7 @@ async function runLiveDiagnostics(user, target, description) {
 
   // 3. Identify target client record
   let clientData = clients.find(c => {
-    const dbUser = (c.user || c.username || c.user_name || '').toLowerCase();
+    const dbUser = (c.user || c.username || c.user_name || c.userName || '').toLowerCase();
     return dbUser.includes(prefix) || prefix.includes(dbUser);
   });
 
