@@ -259,7 +259,7 @@ async function runLiveDiagnostics(user, target, description) {
         body: JSON.stringify({
           tenantUrl: tenantConfig.url || undefined,
           token: tenantConfig.token || undefined,
-          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}`
+          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`)
         })
       });
       const result = await res.json();
@@ -271,7 +271,7 @@ async function runLiveDiagnostics(user, target, description) {
     }
   }
 
-  // Fetch alerts matching target
+  // Fetch alerts matching user prefix
   try {
     const res = await fetch('/api/netskope/proxy', {
       method: 'POST',
@@ -279,7 +279,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/alert?limit=50&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`(site like '${target}' or app like '${target}' or url like '${target}')`),
+        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`),
         method: 'GET'
       })
     });
@@ -291,7 +291,7 @@ async function runLiveDiagnostics(user, target, description) {
     appendLog(`[Warning] Failed to fetch policy alerts: ${err.message}`, 'warning');
   }
 
-  // Fetch page events matching target
+  // Fetch page events matching user prefix
   try {
     const res = await fetch('/api/netskope/proxy', {
       method: 'POST',
@@ -299,7 +299,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/page?limit=50&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`(site like '${target}' or app like '${target}' or url like '${target}')`),
+        endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}' or username like '${prefix}'`),
         method: 'GET'
       })
     });
@@ -313,19 +313,21 @@ async function runLiveDiagnostics(user, target, description) {
 
   // 2. Pre-calculate block and SSL status from fetched events to resolve scope dependency
   let matchAlert = alerts.find(a => {
-    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
     const isBlock = (a.action === 'block' || a.action === 'deny' || a.alert_type === 'block');
-    return isUserMatch && isBlock;
+    const isTargetMatch = (a.site || a.app || a.url || '').toLowerCase().includes(target.toLowerCase()) || 
+                          target.toLowerCase().includes((a.site || a.app || '').toLowerCase());
+    return isBlock && isTargetMatch;
   });
 
   let sslAlert = alerts.find(a => {
-    const isUserMatch = (a.user || a.username || '').toLowerCase().includes(prefix.toLowerCase());
     const isSslError = (a.alert_type === 'ssl' || a.category === 'SSL' || 
                         (a.reason || '').toLowerCase().includes('ssl') || 
                         (a.reason || '').toLowerCase().includes('handshake') ||
                         (a.reason || '').toLowerCase().includes('pinning') ||
                         (a.reason || '').toLowerCase().includes('decryption'));
-    return isUserMatch && isSslError;
+    const isTargetMatch = (a.site || a.app || a.url || '').toLowerCase().includes(target.toLowerCase()) || 
+                          target.toLowerCase().includes((a.site || a.app || '').toLowerCase());
+    return isSslError && isTargetMatch;
   });
 
   const targetUserAlert = alerts.find(a => (a.user || a.username || '').toLowerCase().includes(prefix));
