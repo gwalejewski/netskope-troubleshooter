@@ -259,7 +259,7 @@ async function runLiveDiagnostics(user, target, description) {
         body: JSON.stringify({
           tenantUrl: tenantConfig.url || undefined,
           token: tenantConfig.token || undefined,
-          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`)
+          endpoint: `events/datasearch/clientstatus?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user = "${user}" or user like "${prefix}"`)
         })
       });
       const result = await res.json();
@@ -279,7 +279,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
+        endpoint: `events/datasearch/alert?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user = "${user}" or user like "${prefix}"`),
         method: 'GET'
       })
     });
@@ -299,7 +299,7 @@ async function runLiveDiagnostics(user, target, description) {
       body: JSON.stringify({
         tenantUrl: tenantConfig.url || undefined,
         token: tenantConfig.token || undefined,
-        endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user like '${prefix}'`),
+        endpoint: `events/datasearch/page?limit=100&starttime=${starttime}&endtime=${endtime}&query=` + encodeURIComponent(`user = "${user}" or user like "${prefix}"`),
         method: 'GET'
       })
     });
@@ -330,8 +330,17 @@ async function runLiveDiagnostics(user, target, description) {
     return isSslError && isTargetMatch;
   });
 
-  const targetUserAlert = alerts.find(a => (a.user || a.username || '').toLowerCase().includes(prefix));
-  const targetUserPage = webEvents.find(w => (w.user || w.username || '').toLowerCase().includes(prefix));
+  const targetUserAlert = alerts.find(a => {
+    const isTargetMatch = (a.site || a.app || a.url || '').toLowerCase().includes(target.toLowerCase()) || 
+                          target.toLowerCase().includes((a.site || a.app || '').toLowerCase());
+    return isTargetMatch;
+  });
+
+  const targetUserPage = webEvents.find(w => {
+    const isTargetMatch = (w.site || w.app || w.url || '').toLowerCase().includes(target.toLowerCase()) || 
+                          target.toLowerCase().includes((w.site || w.app || '').toLowerCase());
+    return isTargetMatch;
+  });
 
   if (!matchAlert && !sslAlert && targetUserPage) {
     const policyName = (targetUserPage.policy || '').toLowerCase();
@@ -350,16 +359,19 @@ async function runLiveDiagnostics(user, target, description) {
     return dbUser.includes(prefix) || prefix.includes(dbUser);
   });
 
-  const activeTrafficEvent = targetUserAlert || targetUserPage;
+  // Fallback: If no registry record, check if they generated ANY web logs recently and parse details
+  const anyUserAlert = alerts[0];
+  const anyUserPage = webEvents[0];
+  const anyActiveTrafficEvent = anyUserAlert || anyUserPage;
 
-  if (!clientData && activeTrafficEvent) {
+  if (!clientData && anyActiveTrafficEvent) {
     appendLog(`No recent status change log found, but active steering traffic detected for user prefix "${prefix}". Client is connected and active.`, 'success');
     clientData = {
       status: 'connected',
-      gateway: activeTrafficEvent.netskope_pop || 'Chicago_US (ORD-1)',
-      os: activeTrafficEvent.os || activeTrafficEvent.os_family || 'mac',
-      client_version: activeTrafficEvent.client_version || activeTrafficEvent.os_version || '104.2.1.849',
-      latency: activeTrafficEvent.latency || '14',
+      gateway: anyActiveTrafficEvent.netskope_pop || anyActiveTrafficEvent.gateway || 'Chicago_US (ORD-1)',
+      os: anyActiveTrafficEvent.os || anyActiveTrafficEvent.os_family || 'mac',
+      client_version: anyActiveTrafficEvent.client_version || anyActiveTrafficEvent.os_version || '104.2.1.849',
+      latency: anyActiveTrafficEvent.latency || '14',
       tunnel_type: 'DTLS / UDP'
     };
   }
